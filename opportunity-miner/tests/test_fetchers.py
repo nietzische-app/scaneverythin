@@ -10,7 +10,7 @@ from tests.support import ROOT  # noqa: F401
 
 from config import Settings
 from ingestion.feeds import parse_feed
-from ingestion.hn_fetcher import HackerNewsFetcher, is_focus_story
+from ingestion.hn_fetcher import HackerNewsFetcher, dedupe_ids, fetch_hn_stories, normalize_story
 from ingestion.producthunt_fetcher import ProductHuntFetcher
 from ingestion.reddit_fetcher import RedditFetcher, parse_reddit_listing
 from ingestion.x_fetcher import XFetcher
@@ -114,9 +114,14 @@ REDDIT_RSS = """<?xml version="1.0" encoding="UTF-8"?>
 
 class FetcherTests(unittest.IsolatedAsyncioTestCase):
     def test_focus_rule_and_reddit_parser(self) -> None:
-        self.assertTrue(is_focus_story(HN_ITEMS[1], 40))
-        self.assertFalse(is_focus_story(HN_ITEMS[2], 40))
-        self.assertTrue(is_focus_story(HN_ITEMS[3], 40))
+        self.assertEqual(dedupe_ids([[1, 2, "x"], [2, 4], None, [3]], 10), [1, 2, 4, 3])
+        self.assertEqual(dedupe_ids([[1, 2, 3, 4]], 2), [1, 2])
+        show = normalize_story(HN_ITEMS[1])
+        assert show is not None
+        self.assertEqual(show["id"], "hn_1")
+        self.assertEqual(show["source"], "HackerNews")
+        self.assertEqual(show["text"], "I track leads in a notebook.")
+        self.assertIsNone(normalize_story({"id": 9, "deleted": True, "title": "gone"}))
         posts = parse_reddit_listing(REDDIT, "SaaS")
         self.assertEqual([post.external_id for post in posts], ["abc"])
         self.assertEqual(posts[0].author, "mina")
@@ -128,23 +133,66 @@ class FetcherTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("<p>", posts[0].body)
 
     async def test_hacker_news_keeps_show_hn_and_busy_threads(self) -> None:
+        attempts = {"4": 0}
+
         def handler(request: httpx.Request) -> httpx.Response:
             path = request.url.path
-            if path.endswith("/topstories.json"):
+            if path.endswith("/showstories.json"):
                 return httpx.Response(200, json=[1, 2])
+            if path.endswith("/askstories.json"):
+                return httpx.Response(200, json=[2, 4])
             if path.endswith("/newstories.json"):
-                return httpx.Response(200, json=[2, 3])
-            item_id = int(path.rstrip("/").split("/")[-1].replace(".json", ""))
-            return httpx.Response(200, json=HN_ITEMS[item_id])
+                return httpx.Response(200, json=[3, 5])
+            item_id = path.rstrip("/").split("/")[-1].replace(".json", "")
+            if item_id == "4":
+                attempts["4"] += 1
+                if attempts["4"] == 1:
+                    return httpx.Response(429, headers={"Retry-After": "0"}, json={"retry": True})
+            if item_id == "5":
+                return httpx.Response(200, json=None)
+            payload = {
+                **HN_ITEMS.get(int(item_id), {}),
+                "time": 1_700_000_000,
+            }
+            if item_id == "3":
+                payload = {"id": 3, "deleted": True, "type": "story", "title": "gone"}
+            if item_id == "2":
+                payload = {
+                    "id": 2,
+                    "type": "story",
+                    "title": "Ask HN: Who owns the keyboard",
+                    "by": "bea",
+                    "score": 3,
+                    "descendants": 1,
+                    "url": "https://example.com/keys",
+                    "time": 1_700_000_100,
+                }
+            if item_id == "4":
+                payload = {
+                    "id": 4,
+                    "type": "story",
+                    "title": "Show HN: Invoice ping",
+                    "by": "dee",
+                    "score": 8,
+                    "descendants": 2,
+                    "time": 1_700_000_200,
+                }
+            return httpx.Response(200, json=payload)
 
-        settings = Settings(hn_story_limit=10, hn_min_comments=40, hn_comment_sample=1)
+        settings = Settings(hn_story_limit=10)
         async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            errors: list[str] = []
+            stories = await fetch_hn_stories(client, limit_per_feed=10, errors=errors)
             batch = await HackerNewsFetcher(settings, client).fetch()
-        ids = sorted(post.external_id for post in batch.posts)
-        self.assertEqual(ids, ["1", "3"])
-        show = next(post for post in batch.posts if post.external_id == "1")
-        self.assertIn("reminder loop", show.body)
-        self.assertTrue(show.url.startswith("https://news.ycombinator.com/item?id=1"))
+        self.assertEqual([story["id"] for story in stories], ["hn_1", "hn_2", "hn_4"])
+        self.assertEqual(stories[0]["text"], "I track leads in a notebook.")
+        self.assertEqual(stories[1]["text"], "https://example.com/keys")
+        self.assertEqual(stories[1]["url"], "https://news.ycombinator.com/item?id=2")
+        self.assertEqual(stories[0]["timestamp"], 1_700_000_000)
+        self.assertEqual(stories[0]["comments_count"], 1)
+        self.assertGreaterEqual(attempts["4"], 2)
+        self.assertEqual([post.external_id for post in batch.posts], ["hn_1", "hn_2", "hn_4"])
+        self.assertFalse(any(post.external_id == "hn_3" for post in batch.posts))
 
     async def test_reddit_product_hunt_and_x_reads(self) -> None:
         def reddit_handler(request: httpx.Request) -> httpx.Response:
