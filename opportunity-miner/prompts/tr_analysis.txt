@@ -1,0 +1,50 @@
+Aşağıdaki topluluk gönderisini bir fırsat radarı için incele. Amaç, Türkiye'de bir kişi veya çok küçük bir ekibin Cursor ile çıkarabileceği micro-SaaS, B2B araç veya bağımsız mobil oyun fırsatını ayıklamak.
+
+Görevler:
+1. Çekirdek problemi veya oyun mekaniğini tek net cümleyle yaz.
+2. Türkiye uyarlamasını değerlendir.
+   - Ödeme: iyzico veya PayTR yalnızca para akışı varsa. Yoksa "gerekmez" yaz.
+   - Ticaret / mesajlaşma: ikas, Trendyol veya WhatsApp otomasyonu yalnızca o kanala oturuyorsa. Yoksa "gerekmez" yaz.
+   - KVKK: kişisel veri, ödeme veya kullanıcı hesabı varsa neyin kapsamda olduğunu söyle. Yoksa "gerekmez" yaz.
+3. Oyunsa çekirdek döngüyü (core loop) madde madde yaz ve blueprint.format değerini "core_loop" yap. Yazılım sa MVP özelliklerini yaz ve format değerini "mvp_features" yap.
+4. Vibe coding zorluğu: bu fikrin ilk çalışan dikey kesiti Cursor ile kaç odak gün sürer? Yalnızca 1, 2, 3, 4 veya 5. 1 = tek akşam, 5 = beş tam gün. Beş günü aşan fikirleri 5 yap ve why alanında neden sıkıştığını söyle.
+
+Kurallar:
+- Uydurma ciro, indirme, pazar payı veya fiyat yazma.
+- Zayıf, kalabalık veya Türkiye'de karşılığı olmayan fikirlere düşük opportunity_score ver. Her gönderiyi fırsata zorlama.
+- Kullanıcıya görünen bütün metin alanları Türkçe olsun. JSON anahtarları İngilizce kalsın.
+- Yalnızca aşağıdaki şemaya uyan tek bir JSON nesnesi döndür. Markdown yazma.
+
+{
+  "title_tr": "kısa fırsat adı",
+  "summary_tr": "iki veya üç cümle",
+  "core_problem_or_mechanic": "çekirdek problem veya mekanik",
+  "opportunity_type": "micro_saas | b2b_tool | indie_game | content_tool | other",
+  "turkish_market": {
+    "adaptation": "Türkiye'ye nasıl oturur",
+    "payments": "iyzico/PayTR notu veya gerekmez",
+    "commerce_or_messaging": "ikas/Trendyol/WhatsApp notu veya gerekmez",
+    "kvkk": "KVKK notu veya gerekmez",
+    "fit_score": 0
+  },
+  "blueprint": {
+    "format": "core_loop | mvp_features",
+    "points": ["madde", "madde", "madde"],
+    "mvp_scope": "ilk sürümde bilinçli olarak dışarıda bırakılanlar"
+  },
+  "vibe_coding": {
+    "difficulty_days": 3,
+    "why": "bu gün sayısının gerekçesi",
+    "first_slice": "ilk gün çıkarılacak dikey kesit"
+  },
+  "risks": ["risk", "risk"],
+  "opportunity_score": 0
+}
+
+Gönderi:
+Başlık: {{TITLE}}
+Kaynak: {{SOURCE}}
+Yazar: {{AUTHOR}}
+URL: {{URL}}
+Metin:
+{{BODY}}

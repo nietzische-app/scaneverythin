@@ -1,0 +1,406 @@
+"""Async SQLite log of everything the radar has already seen.
+
+`content_hash` is the duplicate gate. Terminal rows (`filtered_out`,
+`analyzed`, `error`) are left alone on later scans. Rows still in the queue
+are retried without inserting a second copy.
+"""
+
+from __future__ import annotations
+
+import json
+import sqlite3
+from pathlib import Path
+from typing import Any
+
+import aiosqlite
+
+from database.models import InsightView, ItemRecord, RawPost, ScanReport
+from textutil import clip, utcnow_iso
+
+SCHEMA = """
+CREATE TABLE IF NOT EXISTS scanned_items (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    source TEXT NOT NULL,
+    external_id TEXT NOT NULL,
+    url TEXT NOT NULL DEFAULT '',
+    content_hash TEXT NOT NULL UNIQUE,
+    title TEXT NOT NULL DEFAULT '',
+    body TEXT NOT NULL DEFAULT '',
+    author TEXT,
+    score INTEGER,
+    comment_count INTEGER,
+    raw_json TEXT,
+    classification_json TEXT,
+    status TEXT NOT NULL DEFAULT 'new',
+    note TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_items_status_created
+    ON scanned_items(status, created_at);
+
+CREATE TABLE IF NOT EXISTS insights (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    item_id INTEGER NOT NULL UNIQUE REFERENCES scanned_items(id),
+    confidence INTEGER NOT NULL,
+    opportunity_score INTEGER NOT NULL,
+    flags_json TEXT NOT NULL,
+    analysis_json TEXT NOT NULL,
+    telegram_sent INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_insights_score
+    ON insights(opportunity_score DESC, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS scan_runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    started_at TEXT NOT NULL,
+    finished_at TEXT,
+    status TEXT NOT NULL,
+    stats_json TEXT,
+    error TEXT
+);
+"""
+
+_ITEM_COLUMNS = (
+    "id",
+    "source",
+    "external_id",
+    "url",
+    "content_hash",
+    "title",
+    "body",
+    "author",
+    "score",
+    "comment_count",
+    "classification_json",
+    "status",
+    "note",
+    "created_at",
+    "updated_at",
+)
+
+
+class Database:
+    def __init__(self, path: str) -> None:
+        self.path = path
+        self._conn: aiosqlite.Connection | None = None
+
+    async def connect(self) -> None:
+        Path(self.path).parent.mkdir(parents=True, exist_ok=True)
+        self._conn = await aiosqlite.connect(self.path)
+        self._conn.row_factory = aiosqlite.Row
+        await self._conn.execute("PRAGMA journal_mode=WAL")
+        await self._conn.execute("PRAGMA foreign_keys=ON")
+        await self._conn.executescript(SCHEMA)
+        await self._conn.commit()
+
+    async def close(self) -> None:
+        if self._conn is not None:
+            await self._conn.close()
+            self._conn = None
+
+    @property
+    def conn(self) -> aiosqlite.Connection:
+        if self._conn is None:
+            raise RuntimeError("database is not connected")
+        return self._conn
+
+    async def enqueue(self, post: RawPost) -> bool:
+        """Insert a post. Return False when its hash is already stored."""
+        now = utcnow_iso()
+        raw = clip(json.dumps(post.raw, ensure_ascii=False, default=str), 8000)
+        try:
+            await self.conn.execute(
+                """
+                INSERT INTO scanned_items (
+                    source, external_id, url, content_hash, title, body, author,
+                    score, comment_count, raw_json, status, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'new', ?, ?)
+                """,
+                (
+                    post.source,
+                    clip(post.external_id, 300),
+                    clip(post.url, 1000),
+                    post.content_hash,
+                    clip(post.title, 500),
+                    clip(post.body, 20000),
+                    clip(post.author, 200) or None,
+                    post.score,
+                    post.comment_count,
+                    raw,
+                    now,
+                    now,
+                ),
+            )
+        except sqlite3.IntegrityError:
+            return False
+        await self.conn.commit()
+        return True
+
+    async def list_queue(self, statuses: list[str], limit: int, *, oldest_first: bool = True) -> list[ItemRecord]:
+        if limit <= 0 or not statuses:
+            return []
+        placeholders = ", ".join("?" for _ in statuses)
+        direction = "ASC" if oldest_first else "DESC"
+        sql = f"""
+            SELECT {", ".join(_ITEM_COLUMNS)}
+            FROM scanned_items
+            WHERE status IN ({placeholders})
+            ORDER BY created_at {direction}, id {direction}
+            LIMIT ?
+        """
+        async with self.conn.execute(sql, (*statuses, limit)) as cursor:
+            rows = await cursor.fetchall()
+        return [_item(row) for row in rows]
+
+    async def list_items(
+        self,
+        *,
+        status: str | None = None,
+        limit: int = 50,
+        oldest_first: bool = False,
+    ) -> list[ItemRecord]:
+        direction = "ASC" if oldest_first else "DESC"
+        if status is None:
+            sql = f"""
+                SELECT {", ".join(_ITEM_COLUMNS)}
+                FROM scanned_items
+                ORDER BY created_at {direction}, id {direction}
+                LIMIT ?
+            """
+            params: tuple[Any, ...] = (limit,)
+        else:
+            sql = f"""
+                SELECT {", ".join(_ITEM_COLUMNS)}
+                FROM scanned_items
+                WHERE status = ?
+                ORDER BY created_at {direction}, id {direction}
+                LIMIT ?
+            """
+            params = (status, limit)
+        async with self.conn.execute(sql, params) as cursor:
+            rows = await cursor.fetchall()
+        return [_item(row) for row in rows]
+
+    async def count_status(self, status: str) -> int:
+        async with self.conn.execute(
+            "SELECT COUNT(*) AS c FROM scanned_items WHERE status = ?",
+            (status,),
+        ) as cursor:
+            row = await cursor.fetchone()
+        return int(row["c"] if row else 0)
+
+    async def status_counts(self) -> dict[str, int]:
+        async with self.conn.execute(
+            "SELECT status, COUNT(*) AS c FROM scanned_items GROUP BY status"
+        ) as cursor:
+            rows = await cursor.fetchall()
+        return {str(row["status"]): int(row["c"]) for row in rows}
+
+    async def update_item(
+        self,
+        item_id: int,
+        *,
+        status: str,
+        note: str | None = None,
+        classification_json: str | None = None,
+    ) -> None:
+        await self.conn.execute(
+            """
+            UPDATE scanned_items
+            SET status = ?,
+                note = ?,
+                classification_json = COALESCE(?, classification_json),
+                updated_at = ?
+            WHERE id = ?
+            """,
+            (status, note, classification_json, utcnow_iso(), item_id),
+        )
+        await self.conn.commit()
+
+    async def add_insight(
+        self,
+        *,
+        item_id: int,
+        confidence: int,
+        opportunity_score: int,
+        flags_json: str,
+        analysis_json: str,
+    ) -> int:
+        try:
+            cursor = await self.conn.execute(
+                """
+                INSERT INTO insights (
+                    item_id, confidence, opportunity_score, flags_json,
+                    analysis_json, telegram_sent, created_at
+                ) VALUES (?, ?, ?, ?, ?, 0, ?)
+                """,
+                (
+                    item_id,
+                    confidence,
+                    opportunity_score,
+                    flags_json,
+                    analysis_json,
+                    utcnow_iso(),
+                ),
+            )
+        except sqlite3.IntegrityError:
+            async with self.conn.execute(
+                "SELECT id FROM insights WHERE item_id = ?",
+                (item_id,),
+            ) as existing:
+                row = await existing.fetchone()
+            return int(row["id"])
+        await self.conn.commit()
+        return int(cursor.lastrowid or 0)
+
+    async def list_insights(self, limit: int = 20) -> list[InsightView]:
+        sql = """
+            SELECT
+                i.id AS insight_id,
+                i.item_id AS item_id,
+                s.source AS source,
+                s.title AS title,
+                s.url AS url,
+                s.author AS author,
+                i.confidence AS confidence,
+                i.opportunity_score AS opportunity_score,
+                i.analysis_json AS analysis_json,
+                i.telegram_sent AS telegram_sent,
+                i.created_at AS created_at
+            FROM insights i
+            JOIN scanned_items s ON s.id = i.item_id
+            ORDER BY i.opportunity_score DESC, i.created_at DESC
+            LIMIT ?
+        """
+        async with self.conn.execute(sql, (limit,)) as cursor:
+            rows = await cursor.fetchall()
+        return [_insight(row) for row in rows]
+
+    async def pending_notifications(self, limit: int = 20) -> list[InsightView]:
+        sql = """
+            SELECT
+                i.id AS insight_id,
+                i.item_id AS item_id,
+                s.source AS source,
+                s.title AS title,
+                s.url AS url,
+                s.author AS author,
+                i.confidence AS confidence,
+                i.opportunity_score AS opportunity_score,
+                i.analysis_json AS analysis_json,
+                i.telegram_sent AS telegram_sent,
+                i.created_at AS created_at
+            FROM insights i
+            JOIN scanned_items s ON s.id = i.item_id
+            WHERE i.telegram_sent = 0
+            ORDER BY i.opportunity_score DESC, i.id ASC
+            LIMIT ?
+        """
+        async with self.conn.execute(sql, (limit,)) as cursor:
+            rows = await cursor.fetchall()
+        return [_insight(row) for row in rows]
+
+    async def set_telegram_state(self, insight_id: int, state: int) -> None:
+        await self.conn.execute(
+            "UPDATE insights SET telegram_sent = ? WHERE id = ?",
+            (state, insight_id),
+        )
+        await self.conn.commit()
+
+    async def notification_count(self, state: int) -> int:
+        async with self.conn.execute(
+            "SELECT COUNT(*) AS c FROM insights WHERE telegram_sent = ?",
+            (state,),
+        ) as cursor:
+            row = await cursor.fetchone()
+        return int(row["c"] if row else 0)
+
+    async def start_run(self, started_at: str) -> int:
+        cursor = await self.conn.execute(
+            "INSERT INTO scan_runs (started_at, status) VALUES (?, 'running')",
+            (started_at,),
+        )
+        await self.conn.commit()
+        return int(cursor.lastrowid or 0)
+
+    async def finish_run(
+        self,
+        run_id: int,
+        status: str,
+        report: ScanReport,
+        error: str | None = None,
+    ) -> None:
+        await self.conn.execute(
+            """
+            UPDATE scan_runs
+            SET finished_at = ?, status = ?, stats_json = ?, error = ?
+            WHERE id = ?
+            """,
+            (report.finished_at, status, report.model_dump_json(), error, run_id),
+        )
+        await self.conn.commit()
+
+    async def latest_run(self) -> dict[str, Any] | None:
+        async with self.conn.execute(
+            """
+            SELECT id, started_at, finished_at, status, stats_json, error
+            FROM scan_runs
+            ORDER BY id DESC
+            LIMIT 1
+            """
+        ) as cursor:
+            row = await cursor.fetchone()
+        if row is None:
+            return None
+        stats = None
+        if row["stats_json"]:
+            stats = ScanReport.model_validate_json(row["stats_json"]).model_dump()
+        return {
+            "id": row["id"],
+            "started_at": row["started_at"],
+            "finished_at": row["finished_at"],
+            "status": row["status"],
+            "stats": stats,
+            "error": row["error"],
+        }
+
+
+def _item(row: aiosqlite.Row) -> ItemRecord:
+    return ItemRecord(
+        id=row["id"],
+        source=row["source"],
+        external_id=row["external_id"],
+        url=row["url"],
+        content_hash=row["content_hash"],
+        title=row["title"],
+        body=row["body"],
+        author=row["author"],
+        score=row["score"],
+        comment_count=row["comment_count"],
+        classification_json=row["classification_json"],
+        status=row["status"],
+        note=row["note"],
+        created_at=row["created_at"],
+        updated_at=row["updated_at"],
+    )
+
+
+def _insight(row: aiosqlite.Row) -> InsightView:
+    analysis = json.loads(row["analysis_json"] or "{}")
+    return InsightView(
+        insight_id=row["insight_id"],
+        item_id=row["item_id"],
+        source=row["source"],
+        title=row["title"],
+        url=row["url"],
+        author=row["author"],
+        confidence=row["confidence"],
+        opportunity_score=row["opportunity_score"],
+        analysis=analysis,
+        telegram_sent=row["telegram_sent"],
+        created_at=row["created_at"],
+    )
