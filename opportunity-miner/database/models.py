@@ -82,6 +82,7 @@ class Opportunity(BaseModel):
     summary_tr: str
     core_problem_or_mechanic: str
     opportunity_type: str = "other"
+    project_scale: str = ""
     turkish_market: TurkishMarket = Field(default_factory=TurkishMarket)
     blueprint: Blueprint = Field(default_factory=Blueprint)
     vibe_coding: VibeCoding = Field(default_factory=VibeCoding)
@@ -178,12 +179,12 @@ def opportunity_from_payload(payload: dict[str, Any]) -> Opportunity:
         risks_raw = [risks_raw]
     points = [clip(str(point).strip(), 240) for point in points_raw if str(point).strip()][:6]
     risks = [clip(str(risk).strip(), 240) for risk in risks_raw if str(risk).strip()][:4]
-    kind = str(payload.get("opportunity_type") or "other").strip().lower().replace("-", "_").replace(" ", "_")
-    if kind not in {"micro_saas", "b2b_tool", "indie_game", "content_tool", "other"}:
-        kind = "other"
+    raw_type = str(payload.get("opportunity_type") or "").strip()
+    slug = raw_type.lower().replace("-", "_").replace(" ", "_")
     blueprint_format = str(blueprint_raw.get("format") or "").strip().lower()
     if blueprint_format not in {"core_loop", "mvp_features"}:
-        blueprint_format = "core_loop" if kind == "indie_game" else "mvp_features"
+        blueprint_format = "core_loop" if slug == "indie_game" else "mvp_features"
+    kind = _opportunity_type(raw_type)
     market = TurkishMarket(
         adaptation=clip(str(market_raw.get("adaptation") or ""), 1200),
         payments=clip(str(market_raw.get("payments") or ""), 400),
@@ -204,6 +205,7 @@ def opportunity_from_payload(payload: dict[str, Any]) -> Opportunity:
         summary_tr=clip(str(payload.get("summary_tr") or "").strip(), 900),
         core_problem_or_mechanic=clip(str(payload.get("core_problem_or_mechanic") or "").strip(), 600),
         opportunity_type=kind,
+        project_scale=clip(str(payload.get("project_scale") or "").strip(), 80),
         turkish_market=market,
         blueprint=Blueprint(
             format=blueprint_format,
@@ -221,6 +223,27 @@ def opportunity_from_payload(payload: dict[str, Any]) -> Opportunity:
         suggested_domains=domains,
         opportunity_score=score,
     )
+
+
+_TYPE_LABELS = (
+    "Yeni & Kopyalanabilir",
+    "Zamanının Ötesinde / Yeniden Canlandırılabilir",
+    "TR Pazar Fırsatı",
+)
+_TYPE_BY_FOLD = {label.casefold(): label for label in _TYPE_LABELS}
+_LEGACY_TYPES = {"micro_saas", "b2b_tool", "indie_game", "content_tool", "other"}
+
+
+def _opportunity_type(raw: str) -> str:
+    if not raw:
+        return "other"
+    folded = " ".join(raw.casefold().split())
+    if folded in _TYPE_BY_FOLD:
+        return _TYPE_BY_FOLD[folded]
+    slug = raw.lower().replace("-", "_").replace(" ", "_")
+    if slug in _LEGACY_TYPES:
+        return slug
+    return clip(raw, 80)
 
 
 def _suggested_domains(payload: dict[str, Any]) -> list[str]:

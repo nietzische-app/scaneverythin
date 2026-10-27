@@ -133,6 +133,14 @@ def _pick(analysis: dict, *keys: str) -> str:
     return "—"
 
 
+def _type_scale(analysis: dict, *, markdown: bool) -> str:
+    kind = str(analysis.get("opportunity_type") or "").strip() or "—"
+    scale = str(analysis.get("project_scale") or "").strip() or "—"
+    if markdown:
+        return f"🏷️ *Tip & Ölçek:* {escape_md(kind)} \\| {escape_md(scale)}"
+    return f"🏷️ Tip & Ölçek: {kind} | {scale}"
+
+
 def format_alert(view: InsightView) -> str:
     analysis = view.analysis or {}
     title = analysis.get("title_tr") or view.title
@@ -140,6 +148,7 @@ def format_alert(view: InsightView) -> str:
     lines = [
         f"🚀 *FIRSAT RADARI* \\| Skor: {int(view.opportunity_score)}/100",
         "━━━━━━━━━━━━━━━━━━━━",
+        _type_scale(analysis, markdown=True),
         f"📌 *Proje / Fikir:* {escape_md(title)}",
         f"🔗 {md_link('Kaynak Bağlantısı', view.url)}",
         *([domain] if domain else []),
@@ -168,6 +177,7 @@ def plain_alert(view: InsightView) -> str:
         [
             f"🚀 FIRSAT RADARI | Skor: {int(view.opportunity_score)}/100",
             "━━━━━━━━━━━━━━━━━━━━",
+            _type_scale(analysis, markdown=False),
             f"📌 Proje / Fikir: {title}",
             f"🔗 {view.url}",
             *([domain] if domain else []),

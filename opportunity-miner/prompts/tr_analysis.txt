@@ -1,4 +1,4 @@
-Aşağıdaki topluluk gönderisini bir fırsat radarı için incele. Amaç, Türkiye'de bir kişi veya çok küçük bir ekibin Cursor ile çıkarabileceği micro-SaaS, B2B araç veya bağımsız mobil oyun fırsatını ayıklamak.
+Aşağıdaki topluluk gönderisini bir fırsat radarı için incele. Fırsatı üç tipten birine yerleştir: globalde yeni çıkmış ve hızlıca kopyalanıp uyarlanabilecek ürünler, eskiden çıkıp teknoloji veya AI yetersizliğinden sönük kalmış ve bugünkü stack (LLM, RAG, otomasyon) ile canlandırılabilecek projeler, ya da doğrudan Türkiye pazarına özel yerelleştirme. Küçük araçlar kadar büyük çaplı platformlar da adaydır.
 
 Görevler:
 1. Çekirdek problemi veya oyun mekaniğini tek net cümleyle yaz.
@@ -11,7 +11,7 @@ Görevler:
 
 Kurallar:
 - Uydurma ciro, indirme, pazar payı veya fiyat yazma.
-- Zayıf, kalabalık veya Türkiye'de karşılığı olmayan fikirlere düşük opportunity_score ver. Her gönderiyi fırsata zorlama.
+- Zayıf veya kalabalık fikirlere düşük opportunity_score ver. Küçük bir araç olmadığı için puanı düşürme. Büyük çaplı kurumsal platformlara, çok kiracılı B2B SaaS'a ve altyapı ekosistemlerine, 1 günde çıkacak araçlarla eşit veya daha yüksek puan ver. Her gönderiyi fırsata zorlama.
 - Metni doğrudan doğal, profesyonel Türkçe yaz. İngilizce yazıp kelimesi kelimesine çevirme.
 - 2023 sonrası doymuş veya tekelleşmiş AI sarmalayıcıları (standart PDF sohbet, basit metin yeniden yazıcı) için opportunity_score değerini 50'nin altında ver.
 - Kullanıcıya görünen bütün metin alanları Türkçe olsun. JSON anahtarları İngilizce kalsın.
@@ -25,7 +25,8 @@ Kurallar:
   "solution_mechanism": "yazılım problemi nasıl çözüyor",
   "why_now": "neden şimdi",
   "core_problem_or_mechanic": "çekirdek problem veya mekanik",
-  "opportunity_type": "micro_saas | b2b_tool | indie_game | content_tool | other",
+  "opportunity_type": "Yeni & Kopyalanabilir | Zamanının Ötesinde / Yeniden Canlandırılabilir | TR Pazar Fırsatı",
+  "project_scale": "Hızlı MVP | Büyük Çaplı B2B Platformu | Yüksek Hype B2C",
   "turkish_market": {
     "adaptation": "Türkiye'ye nasıl oturur",
     "payments": "iyzico/PayTR notu veya gerekmez",

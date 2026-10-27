@@ -73,6 +73,25 @@ class UpgradeTests(unittest.IsolatedAsyncioTestCase):
             }
         )
         self.assertEqual(opportunity.suggested_domains, ["nodifyradar.io", "nodify.app"])
+        scaled = opportunity_from_payload(
+            {
+                "title_tr": "Platform",
+                "opportunity_type": "zamanının ötesinde / yeniden canlandırılabilir",
+                "project_scale": "Büyük Çaplı B2B Platformu",
+            }
+        )
+        self.assertEqual(scaled.opportunity_type, "Zamanının Ötesinde / Yeniden Canlandırılabilir")
+        self.assertEqual(scaled.project_scale, "Büyük Çaplı B2B Platformu")
+        legacy = opportunity_from_payload({"title_tr": "Oyun", "opportunity_type": "indie_game"})
+        self.assertEqual(legacy.opportunity_type, "indie_game")
+        self.assertEqual(legacy.blueprint.format, "core_loop")
+
+    def test_card_shows_type_and_scale(self) -> None:
+        view = _view()
+        view.analysis["opportunity_type"] = "Yeni & Kopyalanabilir"
+        view.analysis["project_scale"] = "Yüksek Hype B2C"
+        card = plain_alert(view)
+        self.assertIn("🏷️ Tip & Ölçek: Yeni & Kopyalanabilir | Yüksek Hype B2C", card)
 
     async def test_domain_check_uses_the_injected_resolver(self) -> None:
         def resolve(name: str) -> str:
