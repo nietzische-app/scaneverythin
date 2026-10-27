@@ -1,0 +1,63 @@
+Aşağıdaki topluluk gönderisini bir fırsat radarı için incele. Fırsatı üç tipten birine yerleştir: globalde yeni çıkmış ve hızlıca kopyalanıp uyarlanabilecek ürünler, eskiden çıkıp teknoloji veya AI yetersizliğinden sönük kalmış ve bugünkü stack (LLM, RAG, otomasyon) ile canlandırılabilecek projeler, ya da doğrudan Türkiye pazarına özel yerelleştirme. Küçük araçlar kadar büyük çaplı platformlar da adaydır.
+
+Görevler:
+1. Çekirdek problemi veya oyun mekaniğini tek net cümleyle yaz.
+2. Türkiye uyarlamasını değerlendir.
+   - Ödeme: iyzico veya PayTR yalnızca para akışı varsa. Yoksa "gerekmez" yaz.
+   - Ticaret / mesajlaşma: ikas, Trendyol veya WhatsApp otomasyonu yalnızca o kanala oturuyorsa. Yoksa "gerekmez" yaz.
+   - KVKK: kişisel veri, ödeme veya kullanıcı hesabı varsa neyin kapsamda olduğunu söyle. Yoksa "gerekmez" yaz.
+3. Oyunsa çekirdek döngüyü (core loop) madde madde yaz ve blueprint.format değerini "core_loop" yap. Yazılım sa MVP özelliklerini yaz ve format değerini "mvp_features" yap.
+4. Vibe coding zorluğu: bu fikrin ilk çalışan dikey kesiti Cursor ile kaç odak gün sürer? Yalnızca 1, 2, 3, 4 veya 5. 1 = tek akşam, 5 = beş tam gün. Beş günü aşan fikirleri 5 yap ve why alanında neden sıkıştığını söyle.
+
+Kurallar:
+- Uydurma ciro, indirme, pazar payı veya fiyat yazma.
+- Zayıf veya kalabalık fikirlere düşük opportunity_score ver. Küçük bir araç olmadığı için puanı düşürme. Büyük çaplı kurumsal platformlara, çok kiracılı B2B SaaS'a ve altyapı ekosistemlerine, 1 günde çıkacak araçlarla eşit veya daha yüksek puan ver. Her gönderiyi fırsata zorlama.
+- Metni doğrudan doğal, profesyonel Türkçe yaz. İngilizce yazıp kelimesi kelimesine çevirme.
+- 2023 sonrası doymuş veya tekelleşmiş AI sarmalayıcıları (standart PDF sohbet, basit metin yeniden yazıcı) için opportunity_score değerini 50'nin altında ver.
+- Kullanıcıya görünen bütün metin alanları Türkçe olsun. JSON anahtarları İngilizce kalsın.
+- suggested_domains: tam 2 kısa ve akılda kalır alan adı. Yalnızca hostname yaz (ornek.io, ornek.app veya ornek.com). Protokol, boşluk veya yol ekleme.
+- market_scale: tam olarak Micro, SMB, Enterprise B2B veya B2C.
+- Yalnızca aşağıdaki şemaya uyan tek bir JSON nesnesi döndür. Markdown yazma.
+
+{
+  "title_tr": "kısa fırsat adı",
+  "summary_tr": "iki veya üç cümle",
+  "net_problem": "tam olarak kime ne acı çektiriyor",
+  "solution_mechanism": "yazılım problemi nasıl çözüyor",
+  "why_now": "neden şimdi",
+  "core_problem_or_mechanic": "çekirdek problem veya mekanik",
+  "opportunity_type": "Yeni & Kopyalanabilir | Zamanının Ötesinde / Yeniden Canlandırılabilir | TR Pazar Fırsatı",
+  "project_scale": "Hızlı MVP | Büyük Çaplı B2B Platformu | Yüksek Hype B2C",
+  "market_scale": "Micro | SMB | Enterprise B2B | B2C",
+  "turkish_market": {
+    "adaptation": "Türkiye'ye nasıl oturur",
+    "payments": "iyzico/PayTR notu veya gerekmez",
+    "commerce_or_messaging": "ikas/Trendyol/WhatsApp notu veya gerekmez",
+    "kvkk": "KVKK notu veya gerekmez",
+    "fit_score": 0
+  },
+  "blueprint": {
+    "format": "core_loop | mvp_features",
+    "points": ["madde", "madde", "madde"],
+    "mvp_scope": "ilk sürümde bilinçli olarak dışarıda bırakılanlar"
+  },
+  "vibe_coding": {
+    "difficulty_days": 3,
+    "why": "bu gün sayısının gerekçesi",
+    "first_slice": "ilk gün çıkarılacak dikey kesit"
+  },
+  "risks": ["risk", "risk"],
+  "tr_market_analysis": "Türkiye'deki yerel rakipler ve boşluk",
+  "our_differentiator": "pazarda nasıl öne geçileceği",
+  "business_model": "hedef kitle ve gelir modeli",
+  "suggested_domains": ["kisaad.io", "kisaad.app"],
+  "opportunity_score": 0
+}
+
+Gönderi:
+Başlık: {{TITLE}}
+Kaynak: {{SOURCE}}
+Yazar: {{AUTHOR}}
+URL: {{URL}}
+Metin:
+{{BODY}}
