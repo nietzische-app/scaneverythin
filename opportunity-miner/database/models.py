@@ -86,6 +86,9 @@ class Opportunity(BaseModel):
     blueprint: Blueprint = Field(default_factory=Blueprint)
     vibe_coding: VibeCoding = Field(default_factory=VibeCoding)
     risks: list[str] = Field(default_factory=list)
+    tr_market_analysis: str = ""
+    our_differentiator: str = ""
+    business_model: str = ""
     opportunity_score: int = 0
 
 
@@ -203,6 +206,9 @@ def opportunity_from_payload(payload: dict[str, Any]) -> Opportunity:
         ),
         vibe_coding=vibe,
         risks=risks,
+        tr_market_analysis=clip(str(payload.get("tr_market_analysis") or "").strip(), 1200),
+        our_differentiator=clip(str(payload.get("our_differentiator") or "").strip(), 900),
+        business_model=clip(str(payload.get("business_model") or "").strip(), 600),
         opportunity_score=score,
     )
 

@@ -24,8 +24,16 @@ PROMPT_PATH = Path(__file__).resolve().parent.parent / "prompts" / "tr_analysis.
 SYSTEM_PROMPT = (
     "Sen Türkiye pazarı için ürün stratejisti ve oyun tasarımcısısın. "
     "Yalnızca tek bir JSON nesnesi döndür. Markdown kullanma. "
-    "Uydurma metrik yazma. Kullanıcıya görünen metin alanları Türkçe olsun. "
-    "JSON anahtarlarını İngilizce bırak. "
+    "Uydurma metrik yazma. JSON anahtarlarını İngilizce bırak. "
+    "Generate the output directly in natural, high-quality, professional Turkish. "
+    "Do not write in English and translate literally. "
+    "Strictly identify outdated or saturated post-AI wrapper ideas "
+    "(standard PDF chat, basic text rephrasers, saturated AI wrappers). "
+    "If the idea is already monopolized or trivialized post-2023, "
+    "rate its opportunity_score strictly below 50 so it gets filtered out. "
+    "tr_market_analysis: Türkiye pazarındaki yerel rekabet ve boşluklar. "
+    "our_differentiator: Bizim ne farkımız olabilir, pazarda nasıl öne geçeriz (Moat / Valör). "
+    "business_model: hedef kitle ve gelir modeli. "
     "Provide an 'opportunity_score' strictly between 0 and 100 based on SaaS / business potential. "
     "Return that score as an integer."
 )

@@ -11,7 +11,12 @@ from analysis.analyzer import OpenAIAnalyzer, OpenAIUnavailable
 from config import Settings, load_settings
 from tests.support import sample_post
 
-_BODY = '{"title_tr":"Rapor","opportunity_score":71}'
+_BODY = (
+    '{"title_tr":"Rapor","opportunity_score":71,'
+    '"tr_market_analysis":"Yerel boşluk var.",'
+    '"our_differentiator":"Sektöre özel akış.",'
+    '"business_model":"KOBİ aboneliği."}'
+)
 
 
 def _status_error(cls, status: int, message: str):
@@ -58,6 +63,13 @@ def test_default_model_is_gpt_4o_mini_and_parses_the_brief():
     assert "integer" in system
     assert result.title_tr == "Rapor"
     assert result.opportunity_score == 71
+    assert result.tr_market_analysis == "Yerel boşluk var."
+    assert result.our_differentiator == "Sektöre özel akış."
+    assert result.business_model == "KOBİ aboneliği."
+    assert "professional Turkish" in system
+    assert "strictly below 50" in system
+    assert "tr_market_analysis" in system
+    assert "our_differentiator" in system
     assert Settings(openai_model="gpt-4o").openai_model == "gpt-4o"
     assert Settings(openai_model="").openai_model == "gpt-4o-mini"
 

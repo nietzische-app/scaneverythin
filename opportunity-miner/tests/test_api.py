@@ -101,7 +101,9 @@ class ApiTests(unittest.TestCase):
         )
         card = format_alert(view)
         self.assertIn(r"v1\.2\!", card)
-        self.assertIn("Kaynağı aç", card)
+        self.assertIn("Kaynak Bağlantısı", card)
+        self.assertIn("FIRSAT RADARI", card)
+        self.assertIn("TR Rekabet Durumu", card)
         self.assertNotIn("v1.2!", card)
 
 

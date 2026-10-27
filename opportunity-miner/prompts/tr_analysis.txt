@@ -12,6 +12,8 @@ Görevler:
 Kurallar:
 - Uydurma ciro, indirme, pazar payı veya fiyat yazma.
 - Zayıf, kalabalık veya Türkiye'de karşılığı olmayan fikirlere düşük opportunity_score ver. Her gönderiyi fırsata zorlama.
+- Metni doğrudan doğal, profesyonel Türkçe yaz. İngilizce yazıp kelimesi kelimesine çevirme.
+- 2023 sonrası doymuş veya tekelleşmiş AI sarmalayıcıları (standart PDF sohbet, basit metin yeniden yazıcı) için opportunity_score değerini 50'nin altında ver.
 - Kullanıcıya görünen bütün metin alanları Türkçe olsun. JSON anahtarları İngilizce kalsın.
 - Yalnızca aşağıdaki şemaya uyan tek bir JSON nesnesi döndür. Markdown yazma.
 
@@ -38,6 +40,9 @@ Kurallar:
     "first_slice": "ilk gün çıkarılacak dikey kesit"
   },
   "risks": ["risk", "risk"],
+  "tr_market_analysis": "Türkiye'deki yerel rakipler ve boşluk",
+  "our_differentiator": "pazarda nasıl öne geçileceği",
+  "business_model": "hedef kitle ve gelir modeli",
   "opportunity_score": 0
 }
 

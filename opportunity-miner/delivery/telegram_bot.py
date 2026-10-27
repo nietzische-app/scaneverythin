@@ -29,60 +29,66 @@ def md_link(label: str, url: str) -> str:
     return f"[{escape_md(label)}]({safe})"
 
 
+def _field(analysis: dict, key: str) -> str:
+    value = str(analysis.get(key) or "").strip()
+    return value or "—"
+
+
+def _summary(analysis: dict) -> str:
+    summary = str(analysis.get("summary_tr") or "").strip()
+    problem = str(analysis.get("core_problem_or_mechanic") or "").strip()
+    if summary and problem and problem not in summary:
+        return f"{summary}\n{problem}"
+    return summary or problem or "—"
+
+
 def format_alert(view: InsightView) -> str:
     analysis = view.analysis or {}
-    market = analysis.get("turkish_market") or {}
-    blueprint = analysis.get("blueprint") or {}
-    vibe = analysis.get("vibe_coding") or {}
-    points = [str(point) for point in (blueprint.get("points") or [])[:5]]
-    point_lines = "\n".join(f"• {escape_md(point)}" for point in points) or escape_md("—")
-    days = vibe.get("difficulty_days", "?")
+    title = analysis.get("title_tr") or view.title
     lines = [
-        f"*{escape_md('Yeni fırsat')}* · {int(view.opportunity_score)}/100",
-        escape_md(analysis.get("title_tr") or view.title),
-        f"{escape_md('Kaynak')}: {escape_md(view.source)} · {escape_md('güven')} {int(view.confidence)}",
+        f"🚀 *FIRSAT RADARI* \\| Skor: {int(view.opportunity_score)}/100",
+        "━━━━━━━━━━━━━━━━━━━━",
+        f"📌 *Proje / Fikir:* {escape_md(title)}",
+        f"🔗 {md_link('Kaynak Bağlantısı', view.url)}",
         "",
-        f"*{escape_md('Özet')}*",
-        escape_md(analysis.get("summary_tr") or ""),
+        "💡 *Özet & Problem:*",
+        escape_md(_summary(analysis)),
         "",
-        f"*{escape_md('Çekirdek')}*",
-        escape_md(analysis.get("core_problem_or_mechanic") or ""),
+        "🇹🇷 *TR Rekabet Durumu:*",
+        escape_md(_field(analysis, "tr_market_analysis")),
         "",
-        f"*{escape_md('Türkiye')}*",
-        escape_md(market.get("adaptation") or ""),
-        escape_md(f"Ödeme: {market.get('payments') or '—'}"),
-        escape_md(f"Kanal: {market.get('commerce_or_messaging') or '—'}"),
-        escape_md(f"KVKK: {market.get('kvkk') or '—'}"),
+        "⚡ *Bizim Farkımız Ne Olabilir?*",
+        escape_md(_field(analysis, "our_differentiator")),
         "",
-        f"*{escape_md('Plan')}*",
-        point_lines,
-        escape_md(blueprint.get("mvp_scope") or ""),
-        "",
-        escape_md(f"Vibe coding: {days} gün. {vibe.get('why') or ''}"),
-        escape_md(vibe.get("first_slice") or ""),
-        "",
-        md_link("Kaynağı aç", view.url),
+        "🎯 *Hedef Kitle & Gelir Modeli:*",
+        escape_md(_field(analysis, "business_model")),
+        "━━━━━━━━━━━━━━━━━━━━",
     ]
-    return "\n".join(line for line in lines if line is not None).strip()
+    return "\n".join(lines).strip()
 
 
 def plain_alert(view: InsightView) -> str:
     analysis = view.analysis or {}
-    market = analysis.get("turkish_market") or {}
-    vibe = analysis.get("vibe_coding") or {}
+    title = analysis.get("title_tr") or view.title
     return "\n".join(
         [
-            f"Yeni fırsat · {view.opportunity_score}/100",
-            str(analysis.get("title_tr") or view.title),
-            f"Kaynak: {view.source}",
+            f"🚀 FIRSAT RADARI | Skor: {int(view.opportunity_score)}/100",
+            "━━━━━━━━━━━━━━━━━━━━",
+            f"📌 Proje / Fikir: {title}",
+            f"🔗 {view.url}",
             "",
-            str(analysis.get("summary_tr") or ""),
+            "💡 Özet & Problem:",
+            _summary(analysis),
             "",
-            str(analysis.get("core_problem_or_mechanic") or ""),
+            "🇹🇷 TR Rekabet Durumu:",
+            _field(analysis, "tr_market_analysis"),
             "",
-            str(market.get("adaptation") or ""),
-            f"Vibe coding: {vibe.get('difficulty_days', '?')} gün",
-            view.url,
+            "⚡ Bizim Farkımız Ne Olabilir?",
+            _field(analysis, "our_differentiator"),
+            "",
+            "🎯 Hedef Kitle & Gelir Modeli:",
+            _field(analysis, "business_model"),
+            "━━━━━━━━━━━━━━━━━━━━",
         ]
     ).strip()[:3900]
 
