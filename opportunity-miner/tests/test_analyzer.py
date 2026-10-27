@@ -49,6 +49,13 @@ def test_default_model_is_gpt_4o_mini_and_parses_the_brief():
 
     assert seen["model"] == "gpt-4o-mini"
     assert seen["response_format"] == {"type": "json_object"}
+    system = seen["messages"][0]["content"]
+    assert seen["messages"][0]["role"] == "system"
+    assert (
+        "Provide an 'opportunity_score' strictly between 0 and 100 based on SaaS / business potential."
+        in system
+    )
+    assert "integer" in system
     assert result.title_tr == "Rapor"
     assert result.opportunity_score == 71
     assert Settings(openai_model="gpt-4o").openai_model == "gpt-4o"

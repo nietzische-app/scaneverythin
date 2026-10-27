@@ -25,7 +25,9 @@ SYSTEM_PROMPT = (
     "Sen Türkiye pazarı için ürün stratejisti ve oyun tasarımcısısın. "
     "Yalnızca tek bir JSON nesnesi döndür. Markdown kullanma. "
     "Uydurma metrik yazma. Kullanıcıya görünen metin alanları Türkçe olsun. "
-    "JSON anahtarlarını İngilizce bırak."
+    "JSON anahtarlarını İngilizce bırak. "
+    "Provide an 'opportunity_score' strictly between 0 and 100 based on SaaS / business potential. "
+    "Return that score as an integer."
 )
 
 _BLOCKED_STATUS = {401, 403, 429}
