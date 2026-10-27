@@ -1,0 +1,14 @@
+.git
+.venv
+venv
+__pycache__
+**/__pycache__
+*.py[cod]
+.env
+data
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+.pytest_cache
+.mypy_cache
+tests
