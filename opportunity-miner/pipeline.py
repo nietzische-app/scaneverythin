@@ -15,7 +15,7 @@ from database.models import Classification, InsightView, ItemRecord, Opportunity
 from filtering.classifier import GeminiClassifier
 from filtering.heuristic import heuristic_reject
 from ingestion import build_fetchers
-from ingestion.base import FetchBatch, Fetcher
+from ingestion.base import FetchBatch, Fetcher, canonical_key
 from ingestion.domain_checker import check_domains
 from textutil import attempt_count, attempt_note, clip, utcnow_iso
 
@@ -77,6 +77,7 @@ class ScanService:
         self._intake_posts = 0
         self._intake_sources: set[str] = set()
         self._intake_engaged = 0
+        self._seen_keys: set[str] = set()
 
     def current_dial(self) -> float:
         return market_dial(self._intake_posts, len(self._intake_sources), self._intake_engaged)
@@ -95,6 +96,7 @@ class ScanService:
         self._intake_posts = 0
         self._intake_sources = set()
         self._intake_engaged = 0
+        self._seen_keys = set()
         try:
             await self._fetch(report)
             await self._analyze_pending(report)
@@ -144,13 +146,18 @@ class ScanService:
             for error in batch.errors:
                 if error not in report.source_errors:
                     report.source_errors.append(error)
-        if batch.posts:
-            self._intake_sources.add(batch.source)
         for post in batch.posts:
             self._intake_posts += 1
+            self._intake_sources.add(post.source or batch.source)
             if (post.score or 0) >= 10 or (post.comment_count or 0) >= 5:
                 self._intake_engaged += 1
         for post in batch.posts:
+            key = canonical_key(post)
+            if key in self._seen_keys or await self.db.already_seen(post):
+                async with self._report_lock:
+                    report.duplicates += 1
+                continue
+            self._seen_keys.add(key)
             try:
                 created = await self.db.enqueue(post)
             except Exception as exc:  # noqa: BLE001

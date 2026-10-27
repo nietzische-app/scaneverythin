@@ -15,6 +15,7 @@ from typing import Any
 import aiosqlite
 
 from database.models import InsightView, ItemRecord, RawPost, ScanReport
+from ingestion.base import canonical_key
 from textutil import clip, utcnow_iso
 
 SCHEMA = """
@@ -172,6 +173,29 @@ class Database:
             return False
         await self.conn.commit()
         return True
+
+    async def already_seen(self, post: RawPost) -> bool:
+        """True when this URL, or this X status id, is already stored."""
+        key = canonical_key(post)
+        if key.startswith("url:"):
+            url = clip((post.url or "").strip(), 1000)
+            if not url:
+                return False
+            sql = "SELECT 1 AS hit FROM scanned_items WHERE lower(rtrim(url, '/')) = lower(rtrim(?, '/')) LIMIT 1"
+            args: tuple = (url,)
+        elif key.startswith("status:"):
+            status_id = key.split(":", 1)[1]
+            sql = """
+                SELECT 1 AS hit FROM scanned_items
+                WHERE (source IN ('x', 'x-direct') AND external_id = ?)
+                   OR url LIKE ?
+                LIMIT 1
+            """
+            args = (status_id, f"%/status/{status_id}")
+        else:
+            return False
+        async with self.conn.execute(sql, args) as cursor:
+            return await cursor.fetchone() is not None
 
     async def list_queue(self, statuses: list[str], limit: int, *, oldest_first: bool = True) -> list[ItemRecord]:
         if limit <= 0 or not statuses:

@@ -77,6 +77,41 @@ class PipelineTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(report.notified, 0)
         self.assertEqual(notifier.sent, [])
 
+    async def test_same_target_is_not_queued_twice(self) -> None:
+        from ingestion.base import FetchBatch
+
+        service = ScanService(
+            self.settings(),
+            self.db,
+            fetchers=[],
+            classifier=ScriptedClassifier(gold_classification()),
+            analyzer=ScriptedAnalyzer(brief()),
+            notifier=ScriptedNotifier(),
+        )
+        from database.models import ScanReport
+
+        report = ScanReport(started_at="t", finished_at="t")
+        tool = "https://example.com/tool"
+        await service._store_batch(
+            FetchBatch(
+                source="mix",
+                posts=[
+                    sample_post(source="hn", external_id="1", url=tool),
+                    sample_post(source="github", external_id="99", url=tool + "/"),
+                ],
+            ),
+            report,
+        )
+        self.assertEqual(report.enqueued, 1)
+        self.assertEqual(report.duplicates, 1)
+        nitter = sample_post(source="x", external_id="55", url="https://nitter.example/ada/status/55")
+        direct = sample_post(source="x-direct", external_id="55", url="https://x.com/i/status/55")
+        await service._store_batch(FetchBatch(source="x", posts=[nitter, direct]), report)
+        self.assertEqual(report.enqueued, 2)
+        self.assertEqual(report.duplicates, 2)
+        rows = await self.db.list_items(limit=10)
+        self.assertEqual(len(rows), 2)
+
     async def test_duplicate_hash_and_terminal_status(self) -> None:
         post = sample_post()
         self.assertTrue(await self.db.enqueue(post))
@@ -126,7 +161,19 @@ class PipelineTests(unittest.IsolatedAsyncioTestCase):
         service = ScanService(
             self.settings(),
             self.db,
-            fetchers=[StaticFetcher([sample_post(), sample_post(title="hi", body="", external_id="short")])],
+            fetchers=[
+                StaticFetcher(
+                    [
+                        sample_post(),
+                        sample_post(
+                            title="hi",
+                            body="",
+                            external_id="short",
+                            url="https://news.ycombinator.com/item?id=short",
+                        ),
+                    ]
+                )
+            ],
             classifier=ScriptedClassifier(weak),
             analyzer=analyzer,
             notifier=ScriptedNotifier(),
