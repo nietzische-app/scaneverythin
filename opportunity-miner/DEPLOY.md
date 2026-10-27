@@ -17,7 +17,7 @@ cp .env.example .env
 docker compose up -d --build
 ```
 
-The dashboard is `http://SERVER:8000/`. Allow TCP 8000 in the Hetzner firewall. Compose forces `DATABASE_PATH=/app/data/radar.sqlite`, so the file stays on the host at `opportunity-miner/data/radar.sqlite`.
+Compose binds the app to `127.0.0.1:8000` only and forces `DATABASE_PATH=/app/data/radar.sqlite`, so the file stays on the host at `opportunity-miner/data/radar.sqlite`. Do not open port 8000 in the Hetzner firewall.
 
 ## systemd
 
@@ -38,7 +38,7 @@ After=network-online.target
 [Service]
 WorkingDirectory=/opt/scaneverythin/opportunity-miner
 EnvironmentFile=/opt/scaneverythin/opportunity-miner/.env
-ExecStart=/opt/scaneverythin/opportunity-miner/.venv/bin/uvicorn main:app --host 0.0.0.0 --port 8000
+ExecStart=/opt/scaneverythin/opportunity-miner/.venv/bin/uvicorn main:app --host 127.0.0.1 --port 8000
 Restart=on-failure
 
 [Install]
@@ -47,4 +47,46 @@ EOF
 
 sudo systemctl daemon-reload
 sudo systemctl enable --now opportunity-radar
+```
+
+## HTTPS
+
+Point an A record at the VPS, then publish only 22, 80, and 443 in the Hetzner firewall. Caddy fetches the certificate. Replace `radar.senindomainin.com` with that name.
+
+```bash
+sudo apt install -y debian-keyring debian-archive-keyring apt-transport-https curl
+curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | sudo gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
+curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | sudo tee /etc/apt/sources.list.d/caddy-stable.list
+sudo apt update && sudo apt install -y caddy
+
+sudo tee /etc/caddy/Caddyfile >/dev/null <<'EOF'
+radar.senindomainin.com {
+    reverse_proxy localhost:8000
+}
+EOF
+sudo systemctl reload caddy
+```
+
+The dashboard is `https://radar.senindomainin.com/`.
+
+Nginx does the same job if you already run it. Certbot writes the TLS server block.
+
+```bash
+sudo apt install -y nginx certbot python3-certbot-nginx
+sudo tee /etc/nginx/sites-available/radar >/dev/null <<'EOF'
+server {
+    listen 80;
+    server_name radar.senindomainin.com;
+    location / {
+        proxy_pass http://127.0.0.1:8000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
+EOF
+sudo ln -sf /etc/nginx/sites-available/radar /etc/nginx/sites-enabled/radar
+sudo rm -f /etc/nginx/sites-enabled/default
+sudo nginx -t && sudo systemctl reload nginx
+sudo certbot --nginx -d radar.senindomainin.com
 ```
