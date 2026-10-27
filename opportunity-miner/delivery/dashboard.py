@@ -219,7 +219,7 @@ def render_dashboard(context: dict[str, Any]) -> str:
   <main>
     <div class="providers">
       {_pill('Gemini', providers['gemini'])}
-      {_pill('DeepSeek', providers['deepseek'])}
+      {_pill('OpenAI', providers['openai'])}
       {_pill('Telegram', providers['telegram'])}
       {_pill('Belirteç', token_required)}
     </div>

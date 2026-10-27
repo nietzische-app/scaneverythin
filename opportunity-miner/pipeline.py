@@ -8,7 +8,7 @@ from typing import Protocol
 
 import httpx
 
-from analysis.analyzer import DeepSeekAnalyzer
+from analysis.analyzer import OpenAIAnalyzer, OpenAIUnavailable
 from config import Settings
 from database.db import Database
 from database.models import Classification, InsightView, ItemRecord, Opportunity, RawPost, ScanReport
@@ -63,13 +63,14 @@ class ScanService:
         self.db = db
         self.fetchers = fetchers
         self.classifier = classifier or GeminiClassifier(settings)
-        self.analyzer = analyzer or DeepSeekAnalyzer(settings)
+        self.analyzer = analyzer or OpenAIAnalyzer(settings)
         self.notifier = notifier
         if self.notifier is None:
             from delivery.telegram_bot import TelegramNotifier
 
             self.notifier = TelegramNotifier(settings)
         self._analysis_slots = 0
+        self._openai_blocked = False
         self._slot_lock = asyncio.Lock()
         self._report_lock = asyncio.Lock()
 
@@ -83,6 +84,7 @@ class ScanService:
         report = ScanReport(started_at=started, finished_at=started)
         run_id = await self.db.start_run(started)
         self._analysis_slots = self.settings.max_analyses_per_scan
+        self._openai_blocked = False
         try:
             await self._fetch(report)
             await self._analyze_pending(report)
@@ -144,7 +146,7 @@ class ScanService:
         if waiting == 0:
             return
         if not self.analyzer.available:
-            await self._note(report, "deepseek_not_configured")
+            await self._note(report, "openai_not_configured")
             await self._inc(report, "deferred", waiting)
             return
         rows = await self.db.list_queue(
@@ -212,7 +214,7 @@ class ScanService:
             classification_json=payload,
         )
         if not self.analyzer.available:
-            await self._note(report, "deepseek_not_configured")
+            await self._note(report, "openai_not_configured")
             await self._inc(report, "deferred")
             return
         if not await self._take_analysis_slot():
@@ -223,8 +225,19 @@ class ScanService:
 
     async def _analyze_one(self, row: ItemRecord, report: ScanReport) -> None:
         post = row.to_raw_post()
+        if self._openai_blocked:
+            await self._inc(report, "deferred")
+            return
         try:
             opportunity = await self.analyzer.analyze(post)
+        except OpenAIUnavailable as exc:
+            logger.warning("OpenAI stopped analysis for %s: %s", row.external_id, exc)
+            async with self._slot_lock:
+                self._openai_blocked = True
+                self._analysis_slots = 0
+            await self._note(report, str(exc) or "openai_unavailable")
+            await self._inc(report, "deferred")
+            return
         except Exception as exc:  # noqa: BLE001
             logger.warning("analysis failed for %s: %s", row.external_id, exc)
             await self._fail(row, report, clip(str(exc), 300), "pending_analysis")

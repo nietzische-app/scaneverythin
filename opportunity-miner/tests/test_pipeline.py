@@ -16,6 +16,7 @@ from tests.support import (
     sample_post,
 )
 
+from analysis.analyzer import OpenAIUnavailable
 from config import Settings
 from database.db import Database
 from database.models import Classification
@@ -165,6 +166,27 @@ class PipelineTests(unittest.IsolatedAsyncioTestCase):
         again = await service.run()
         self.assertEqual(again.classified, 0)
         self.assertEqual(service.classifier.calls, 3)
+
+    async def test_openai_quota_leaves_the_queue_and_finishes_the_scan(self) -> None:
+        posts = [
+            sample_post(external_id=str(index), url=f"https://news.ycombinator.com/item?id={index}")
+            for index in range(2)
+        ]
+        analyzer = ScriptedAnalyzer(OpenAIUnavailable("openai_quota"))
+        service = ScanService(
+            self.settings(classifier_concurrency=1),
+            self.db,
+            fetchers=[StaticFetcher(posts)],
+            classifier=ScriptedClassifier(gold_classification()),
+            analyzer=analyzer,
+            notifier=ScriptedNotifier(),
+        )
+        report = await service.run()
+        self.assertEqual(report.analyzed, 0)
+        self.assertEqual(analyzer.calls, 1)
+        self.assertIn("openai_quota", report.source_errors)
+        self.assertEqual(await self.db.count_status("pending_analysis"), 2)
+        self.assertEqual(await self.db.count_status("error"), 0)
 
     async def test_coordinator_reports_busy_and_errors(self) -> None:
         class Boom:

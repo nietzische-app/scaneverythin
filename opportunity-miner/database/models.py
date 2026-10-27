@@ -158,7 +158,7 @@ class ScanReport(BaseModel):
 
 
 def opportunity_from_payload(payload: dict[str, Any]) -> Opportunity:
-    """Normalize a DeepSeek JSON object into the brief we store and notify."""
+    """Normalize an OpenAI JSON object into the brief we store and notify."""
     market_raw = payload.get("turkish_market") if isinstance(payload.get("turkish_market"), dict) else {}
     blueprint_raw = payload.get("blueprint") if isinstance(payload.get("blueprint"), dict) else {}
     vibe_raw = payload.get("vibe_coding") if isinstance(payload.get("vibe_coding"), dict) else {}

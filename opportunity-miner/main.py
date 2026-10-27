@@ -199,7 +199,7 @@ def create_app(
 def _providers(settings: Settings) -> dict[str, bool]:
     return {
         "gemini": settings.gemini_configured,
-        "deepseek": settings.deepseek_configured,
+        "openai": settings.openai_configured,
         "telegram": settings.telegram_configured,
     }
 

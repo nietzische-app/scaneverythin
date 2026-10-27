@@ -1,0 +1,101 @@
+"""Stage-2 calls OpenAI and turns quota or auth failures into a queued skip."""
+
+from __future__ import annotations
+
+import asyncio
+
+import httpx
+from openai import AuthenticationError, RateLimitError
+
+from analysis.analyzer import OpenAIAnalyzer, OpenAIUnavailable
+from config import Settings, load_settings
+from tests.support import sample_post
+
+_BODY = '{"title_tr":"Rapor","opportunity_score":71}'
+
+
+def _status_error(cls, status: int, message: str):
+    request = httpx.Request("POST", "https://api.openai.com/v1/chat/completions")
+    response = httpx.Response(status, request=request)
+    return cls(message, response=response, body={"error": {"message": message}})
+
+
+class _Client:
+    def __init__(self, create) -> None:
+        self.chat = self
+        self.completions = self
+        self._create = create
+        self.closed = False
+
+    def create(self, **kwargs):
+        return self._create(**kwargs)
+
+    def close(self) -> None:
+        self.closed = True
+
+
+def test_default_model_is_gpt_4o_mini_and_parses_the_brief():
+    seen: dict = {}
+
+    def create(**kwargs):
+        seen.update(kwargs)
+        message = type("Message", (), {"content": _BODY})()
+        choice = type("Choice", (), {"message": message})()
+        return type("Response", (), {"choices": [choice]})()
+
+    analyzer = OpenAIAnalyzer(Settings(openai_api_key="sk-test"))
+    analyzer._client = _Client(create)
+    result = asyncio.run(analyzer.analyze(sample_post()))
+
+    assert seen["model"] == "gpt-4o-mini"
+    assert seen["response_format"] == {"type": "json_object"}
+    assert result.title_tr == "Rapor"
+    assert result.opportunity_score == 71
+    assert Settings(openai_model="gpt-4o").openai_model == "gpt-4o"
+    assert Settings(openai_model="").openai_model == "gpt-4o-mini"
+
+
+def test_client_is_constructed_with_openai_api_key(monkeypatch):
+    created: dict = {}
+
+    class Fake:
+        def __init__(self, *, api_key: str) -> None:
+            created["api_key"] = api_key
+
+        def close(self) -> None:
+            return None
+
+    monkeypatch.setattr("analysis.analyzer.OpenAI", Fake)
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-from-env")
+    monkeypatch.setenv("OPENAI_MODEL", "gpt-4o")
+    loaded = load_settings()
+    client = OpenAIAnalyzer(loaded)._client_or_create()
+    assert isinstance(client, Fake)
+    assert created["api_key"] == "sk-from-env"
+    assert loaded.openai_model == "gpt-4o"
+
+
+def test_auth_and_quota_do_not_escape_as_sdk_errors():
+    def boom(error):
+        def create(**kwargs):
+            raise error
+
+        return create
+
+    auth = OpenAIAnalyzer(Settings(openai_api_key="sk-test"))
+    auth._client = _Client(boom(_status_error(AuthenticationError, 401, "invalid api key")))
+    try:
+        asyncio.run(auth.analyze(sample_post()))
+    except OpenAIUnavailable as exc:
+        assert str(exc) == "openai_auth"
+    else:
+        raise AssertionError("auth error escaped")
+
+    quota = OpenAIAnalyzer(Settings(openai_api_key="sk-test", openai_model="gpt-4o"))
+    quota._client = _Client(boom(_status_error(RateLimitError, 429, "insufficient_quota")))
+    try:
+        asyncio.run(quota.analyze(sample_post()))
+    except OpenAIUnavailable as exc:
+        assert str(exc) == "openai_quota"
+    else:
+        raise AssertionError("quota error escaped")

@@ -12,7 +12,7 @@ sudo usermod -aG docker "$USER"
 git clone https://github.com/nietzische-app/scaneverythin.git
 cd scaneverythin/opportunity-miner
 cp .env.example .env
-# set GEMINI_API_KEY, DEEPSEEK_API_KEY, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
+# set GEMINI_API_KEY, OPENAI_API_KEY, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
 
 docker compose up -d --build
 ```

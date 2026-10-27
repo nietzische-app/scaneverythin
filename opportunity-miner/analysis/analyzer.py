@@ -1,7 +1,8 @@
-"""Stage-2 brief on DeepSeek (OpenAI-compatible).
+"""Stage-2 Turkish brief on OpenAI.
 
 Only posts that already cleared Stage-1 should be passed in. The default
-model is `deepseek-chat` (V3). Set DEEPSEEK_MODEL=deepseek-reasoner for R1.
+model is `gpt-4o-mini`. Set OPENAI_MODEL=gpt-4o for the larger model.
+The model still returns one JSON object; Telegram renders that brief as Markdown.
 """
 
 from __future__ import annotations
@@ -9,6 +10,8 @@ from __future__ import annotations
 import asyncio
 import logging
 from pathlib import Path
+
+from openai import APIStatusError, OpenAI
 
 from config import Settings
 from database.models import Opportunity, RawPost, opportunity_from_payload
@@ -25,6 +28,12 @@ SYSTEM_PROMPT = (
     "JSON anahtarlarını İngilizce bırak."
 )
 
+_BLOCKED_STATUS = {401, 403, 429}
+
+
+class OpenAIUnavailable(RuntimeError):
+    """Auth or quota failure. The scan leaves the post queued and moves on."""
+
 
 def render_prompt(template: str, post: RawPost, body_limit: int = 4000) -> str:
     return (
@@ -36,20 +45,31 @@ def render_prompt(template: str, post: RawPost, body_limit: int = 4000) -> str:
     )
 
 
-class DeepSeekAnalyzer:
+def _blocked(exc: Exception) -> bool:
+    status = getattr(exc, "status_code", None)
+    return isinstance(exc, APIStatusError) and status in _BLOCKED_STATUS
+
+
+def _unavailable(exc: Exception) -> OpenAIUnavailable:
+    status = getattr(exc, "status_code", None)
+    code = "openai_quota" if status == 429 else "openai_auth"
+    return OpenAIUnavailable(code)
+
+
+class OpenAIAnalyzer:
     def __init__(self, settings: Settings, prompt_path: Path | None = None, complete=None) -> None:
         self.settings = settings
         self.prompt_path = prompt_path or PROMPT_PATH
         self._complete_override = complete
-        self._client = None
+        self._client: OpenAI | None = None
 
     @property
     def available(self) -> bool:
-        return self._complete_override is not None or self.settings.deepseek_configured
+        return self._complete_override is not None or self.settings.openai_configured
 
     async def analyze(self, post: RawPost) -> Opportunity:
         if not self.available:
-            raise RuntimeError("deepseek_not_configured")
+            raise RuntimeError("openai_not_configured")
         template = self.prompt_path.read_text(encoding="utf-8")
         user_prompt = render_prompt(template, post)
         content = await asyncio.wait_for(
@@ -59,9 +79,10 @@ class DeepSeekAnalyzer:
         return opportunity_from_payload(parse_json_object(content))
 
     async def aclose(self) -> None:
-        if self._client is not None:
-            await self._client.close()
-            self._client = None
+        client = self._client
+        self._client = None
+        if client is not None:
+            client.close()
 
     async def _complete(self, user_prompt: str) -> str:
         if self._complete_override is not None:
@@ -69,19 +90,32 @@ class DeepSeekAnalyzer:
             if asyncio.iscoroutine(result):
                 return await result
             return result
-        client = self._client_or_create()
         try:
-            return await self._request(client, user_prompt, json_mode=True)
+            return await self._request(user_prompt, json_mode=True)
+        except OpenAIUnavailable:
+            raise
         except Exception as exc:
+            if _blocked(exc):
+                raise _unavailable(exc) from exc
             message = str(exc).lower()
             if "response_format" not in message and "json" not in message:
                 raise
-            logger.info("retrying DeepSeek without JSON mode: %s", exc)
-            return await self._request(client, user_prompt, json_mode=False)
+            logger.info("retrying OpenAI without JSON mode: %s", exc)
+            return await self._request(user_prompt, json_mode=False)
 
-    async def _request(self, client, user_prompt: str, *, json_mode: bool) -> str:
+    async def _request(self, user_prompt: str, *, json_mode: bool) -> str:
+        try:
+            return await asyncio.to_thread(self._request_sync, user_prompt, json_mode)
+        except OpenAIUnavailable:
+            raise
+        except Exception as exc:
+            if _blocked(exc):
+                raise _unavailable(exc) from exc
+            raise
+
+    def _request_sync(self, user_prompt: str, json_mode: bool) -> str:
         kwargs = {
-            "model": self.settings.deepseek_model,
+            "model": self.settings.openai_model,
             "temperature": 0.3,
             "messages": [
                 {"role": "system", "content": SYSTEM_PROMPT},
@@ -90,18 +124,13 @@ class DeepSeekAnalyzer:
         }
         if json_mode:
             kwargs["response_format"] = {"type": "json_object"}
-        response = await client.chat.completions.create(**kwargs)
+        response = self._client_or_create().chat.completions.create(**kwargs)
         content = response.choices[0].message.content or ""
         if not content.strip():
-            raise RuntimeError("empty DeepSeek response")
+            raise RuntimeError("empty OpenAI response")
         return content
 
-    def _client_or_create(self):
+    def _client_or_create(self) -> OpenAI:
         if self._client is None:
-            from openai import AsyncOpenAI
-
-            self._client = AsyncOpenAI(
-                api_key=self.settings.deepseek_api_key,
-                base_url=self.settings.deepseek_base_url,
-            )
+            self._client = OpenAI(api_key=self.settings.openai_api_key)
         return self._client

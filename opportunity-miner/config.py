@@ -1,7 +1,7 @@
 """Environment-backed settings.
 
 The process boots with empty API keys. Ingestion and the dashboard still work;
-Gemini, DeepSeek, and Telegram stages no-op until their variables are set.
+Gemini, OpenAI, and Telegram stages no-op until their variables are set.
 """
 
 from __future__ import annotations
@@ -60,9 +60,8 @@ class Settings(BaseModel):
 
     gemini_api_key: str = ""
     gemini_model: str = "gemini-2.0-flash"
-    deepseek_api_key: str = ""
-    deepseek_base_url: str = "https://api.deepseek.com"
-    deepseek_model: str = "deepseek-chat"
+    openai_api_key: str = ""
+    openai_model: str = "gpt-4o-mini"
     telegram_bot_token: str = ""
     telegram_chat_id: str = ""
     api_token: str = ""
@@ -141,18 +140,23 @@ class Settings(BaseModel):
             raise ValueError("classifier_mode must be 'batched' or 'parallel'")
         return mode
 
-    @field_validator("deepseek_base_url", "producthunt_feed_url")
+    @field_validator("producthunt_feed_url")
     @classmethod
     def _strip_url(cls, value: str) -> str:
         return value.strip().rstrip("/")
+
+    @field_validator("openai_model")
+    @classmethod
+    def _openai_model(cls, value: str) -> str:
+        return (value or "").strip() or "gpt-4o-mini"
 
     @property
     def gemini_configured(self) -> bool:
         return bool(self.gemini_api_key.strip())
 
     @property
-    def deepseek_configured(self) -> bool:
-        return bool(self.deepseek_api_key.strip())
+    def openai_configured(self) -> bool:
+        return bool(self.openai_api_key.strip())
 
     @property
     def telegram_configured(self) -> bool:
@@ -165,9 +169,8 @@ def load_settings() -> Settings:
     return Settings(
         gemini_api_key=_env("GEMINI_API_KEY"),
         gemini_model=_env("GEMINI_MODEL", "gemini-2.0-flash"),
-        deepseek_api_key=_env("DEEPSEEK_API_KEY"),
-        deepseek_base_url=_env("DEEPSEEK_BASE_URL", "https://api.deepseek.com"),
-        deepseek_model=_env("DEEPSEEK_MODEL", "deepseek-chat"),
+        openai_api_key=_env("OPENAI_API_KEY"),
+        openai_model=_env("OPENAI_MODEL", "gpt-4o-mini"),
         telegram_bot_token=_env("TELEGRAM_BOT_TOKEN"),
         telegram_chat_id=_env("TELEGRAM_CHAT_ID"),
         api_token=_env("API_TOKEN"),
