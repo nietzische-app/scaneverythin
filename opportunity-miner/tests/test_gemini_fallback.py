@@ -32,6 +32,21 @@ def test_generate_content_is_called_with_gemini_2_0_flash():
     assert seen == ["gemini-2.0-flash"]
 
 
+def test_real_calls_sleep_four_seconds_between_posts(monkeypatch):
+    sleeps: list[float] = []
+    monkeypatch.setattr("filtering.classifier.time.sleep", lambda seconds: sleeps.append(seconds))
+
+    class Models:
+        def generate_content(self, *, model, contents, config):
+            return type("Response", (), {"text": "{\"is_human\": true}"})()
+
+    classifier = GeminiClassifier(Settings(gemini_api_key="k", gemini_model="gemini-2.0-flash"))
+    classifier._client = type("Client", (), {"models": Models()})()
+    asyncio.run(classifier.classify(sample_post()))
+    asyncio.run(classifier.classify(sample_post()))
+    assert sleeps == [4]
+
+
 def test_flash_fallback_order_is_bare_ids():
     assert list(FLASH_MODELS) == ["gemini-2.0-flash", "gemini-1.5-flash", "gemini-2.5-flash"]
 
@@ -150,7 +165,8 @@ def _not_found(model: str) -> ClientError:
     )
 
 
-def test_skips_image_models_and_zero_quota_then_pins_the_winner():
+def test_skips_image_models_and_zero_quota_then_pins_the_winner(monkeypatch):
+    monkeypatch.setattr("filtering.classifier.time.sleep", lambda _seconds: None)
     seen: list[str] = []
     listed = {"calls": 0}
 
@@ -234,7 +250,8 @@ def test_real_rate_limit_does_not_walk_the_fallback_list():
     assert result.error is not None
 
 
-def test_next_post_continues_past_dead_listed_models():
+def test_next_post_continues_past_dead_listed_models(monkeypatch):
+    monkeypatch.setattr("filtering.classifier.time.sleep", lambda _seconds: None)
     seen: list[str] = []
 
     class Listed:

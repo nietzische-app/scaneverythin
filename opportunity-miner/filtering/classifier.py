@@ -13,6 +13,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import threading
+import time
 
 from config import Settings
 from database.models import Classification, RawPost
@@ -185,6 +187,8 @@ class GeminiClassifier:
         self._dead: set[str] = set()
         self._working: str | None = None
         self._catalog: list | None = None
+        self._pace_lock = threading.Lock()
+        self._paced = False
 
     @property
     def available(self) -> bool:
@@ -232,10 +236,18 @@ class GeminiClassifier:
             if asyncio.iscoroutine(result):
                 return await result
             return result
+        await asyncio.to_thread(self._pace)
         return await asyncio.wait_for(
             asyncio.to_thread(self._generate_sync, prompt),
             timeout=self.settings.llm_timeout_seconds,
         )
+
+    def _pace(self) -> None:
+        """Keep real Gemini calls under the free-tier 15 RPM cap."""
+        with self._pace_lock:
+            if self._paced:
+                time.sleep(4)
+            self._paced = True
 
     def _generate_sync(self, prompt: str) -> str:
         client = self._sdk()
