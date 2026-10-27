@@ -17,6 +17,9 @@ Kurallar:
 - Kullanıcıya görünen bütün metin alanları Türkçe olsun. JSON anahtarları İngilizce kalsın.
 - suggested_domains: tam 2 kısa ve akılda kalır alan adı. Yalnızca hostname yaz (ornek.io, ornek.app veya ornek.com). Protokol, boşluk veya yol ekleme.
 - market_scale: tam olarak Micro, SMB, Enterprise B2B veya B2C.
+- top_competitors: 2 veya 3 ana global ya da yerel rakip. Her madde rakip adı ve tahmini model/varlık taşısın, örneğin RakipA (Commercial SaaS) veya RakipB (Open Source).
+- competitor_weakness: mevcut çözümlerdeki ana kullanıcı şikayeti veya boşluk.
+- search_trend_signal: arama hacmi ve hype yönünün nitel değerlendirmesi. Kaynak desteklemiyorsa yüzde uydurma. Bilinmiyorsa "Sinyal belirsiz" yaz.
 - Yalnızca aşağıdaki şemaya uyan tek bir JSON nesnesi döndür. Markdown yazma.
 
 {
@@ -50,6 +53,9 @@ Kurallar:
   "tr_market_analysis": "Türkiye'deki yerel rakipler ve boşluk",
   "our_differentiator": "pazarda nasıl öne geçileceği",
   "business_model": "hedef kitle ve gelir modeli",
+  "top_competitors": ["RakipA (Commercial SaaS)", "RakipB (Open Source)"],
+  "competitor_weakness": "mevcut çözümlerdeki ana şikayet veya boşluk",
+  "search_trend_signal": "Stabil / Niş arama hacmi",
   "suggested_domains": ["kisaad.io", "kisaad.app"],
   "opportunity_score": 0
 }

@@ -94,6 +94,9 @@ class Opportunity(BaseModel):
     solution_mechanism: str = ""
     why_now: str = ""
     suggested_domains: list[str] = Field(default_factory=list)
+    top_competitors: list[str] = Field(default_factory=list)
+    competitor_weakness: str = ""
+    search_trend_signal: str = ""
     market_scale: str = ""
     judge_verdict: str = ""
     market_dial: float | None = None
@@ -224,6 +227,9 @@ def opportunity_from_payload(payload: dict[str, Any]) -> Opportunity:
         solution_mechanism=clip(str(payload.get("solution_mechanism") or "").strip(), 600),
         why_now=clip(str(payload.get("why_now") or "").strip(), 600),
         suggested_domains=domains,
+        top_competitors=_top_competitors(payload.get("top_competitors")),
+        competitor_weakness=clip(str(payload.get("competitor_weakness") or "").strip(), 900),
+        search_trend_signal=clip(str(payload.get("search_trend_signal") or "").strip(), 240),
         market_scale=_market_scale(payload.get("market_scale")),
         judge_verdict=clip(str(payload.get("judge_verdict") or "").strip(), 1200),
         market_dial=_market_dial(payload.get("market_dial")),
@@ -282,6 +288,31 @@ def _opportunity_type(raw: str) -> str:
     if slug in _LEGACY_TYPES:
         return slug
     return clip(raw, 80)
+
+
+def _top_competitors(raw: object) -> list[str]:
+    if isinstance(raw, str):
+        items = [part.strip() for part in raw.replace("\n", "|").split("|")]
+    elif isinstance(raw, list):
+        items = []
+        for item in raw:
+            if isinstance(item, dict):
+                name = str(item.get("name") or item.get("competitor") or "").strip()
+                presence = str(item.get("presence") or item.get("model") or "").strip()
+                text = f"{name} ({presence})" if name and presence else name or presence
+            else:
+                text = str(item).strip()
+            items.append(text)
+    else:
+        items = []
+    found: list[str] = []
+    for item in items:
+        name = clip(item, 120)
+        if name and name not in found:
+            found.append(name)
+        if len(found) == 3:
+            break
+    return found
 
 
 def _suggested_domains(payload: dict[str, Any]) -> list[str]:

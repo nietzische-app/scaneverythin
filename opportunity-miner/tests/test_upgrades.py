@@ -21,6 +21,7 @@ from delivery.digest import digest_due, format_digest, seconds_until_digest, sen
 from delivery.telegram_bot import (
     TelegramNotifier,
     callback_insight_id,
+    format_alert,
     grok_prompt,
     handle_callback,
     mvp_keyboard,
@@ -61,7 +62,11 @@ def _view(score: int = 82, title: str = "Nodify") -> InsightView:
 class UpgradeTests(unittest.IsolatedAsyncioTestCase):
     def test_prompt_asks_for_two_domains_and_the_parser_keeps_two(self) -> None:
         self.assertIn("suggested_domains", SYSTEM_PROMPT)
-        self.assertIn("suggested_domains", PROMPT_PATH.read_text(encoding="utf-8"))
+        prompt = PROMPT_PATH.read_text(encoding="utf-8")
+        self.assertIn("suggested_domains", prompt)
+        self.assertIn("top_competitors", prompt)
+        self.assertIn("competitor_weakness", prompt)
+        self.assertIn("search_trend_signal", prompt)
         opportunity = opportunity_from_payload(
             {
                 "title_tr": "Ad",
@@ -96,6 +101,51 @@ class UpgradeTests(unittest.IsolatedAsyncioTestCase):
         view.analysis["judge_verdict"] = "Açık kaynak alternatifi var, MRR zayıf."
         self.assertIn("⚖️ Yargıç / Risk Notu:", plain_alert(view))
         self.assertIn("Açık kaynak alternatifi var, MRR zayıf.", plain_alert(view))
+        view.analysis["top_competitors"] = [
+            "RakipA (Commercial SaaS)",
+            "RakipB (Open Source)",
+        ]
+        view.analysis["competitor_weakness"] = "Kurulum günler sürüyor."
+        view.analysis["search_trend_signal"] = "Stabil / Niş arama hacmi"
+        card = plain_alert(view)
+        self.assertIn("🎯 Pazar & Rakip Analizi:", card)
+        self.assertIn("• ⚔️ Rakipler: RakipA (Commercial SaaS) | RakipB (Open Source)", card)
+        self.assertIn("• ⚠️ Rakiplerin Zayıf Karnı: Kurulum günler sürüyor.", card)
+        self.assertIn("• 📈 Arama Hacmi & Hype: Stabil / Niş arama hacmi", card)
+        self.assertIn(r"RakipA \(Commercial SaaS\)", format_alert(view))
+
+    async def test_competitor_columns_are_stored(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            db = Database(str(Path(tmp) / "radar.sqlite"))
+            await db.connect()
+            await db.enqueue(sample_post())
+            item = (await db.list_items(status="new"))[0]
+            opportunity = opportunity_from_payload(
+                {
+                    "title_tr": "Radar",
+                    "top_competitors": [
+                        {"name": "RakipA", "presence": "Commercial SaaS"},
+                        "RakipB (Open Source)",
+                    ],
+                    "competitor_weakness": "Kurulum günler sürüyor.",
+                    "search_trend_signal": "Stabil / Niş arama hacmi",
+                }
+            )
+            await db.add_insight(
+                item_id=item.id,
+                confidence=90,
+                opportunity_score=80,
+                flags_json="{}",
+                analysis_json=opportunity.model_dump_json(),
+            )
+            async with db.conn.execute(
+                "SELECT top_competitors, competitor_weakness, search_trend_signal FROM insights"
+            ) as cursor:
+                row = await cursor.fetchone()
+            self.assertEqual(row["top_competitors"], "RakipA (Commercial SaaS) | RakipB (Open Source)")
+            self.assertEqual(row["competitor_weakness"], "Kurulum günler sürüyor.")
+            self.assertEqual(row["search_trend_signal"], "Stabil / Niş arama hacmi")
+            await db.close()
 
     def test_judge_gates_and_quiet_day_dial(self) -> None:
         self.assertEqual(apply_judge_gates(90, {"devtool_class": "micro"}), 49)
@@ -125,6 +175,39 @@ class UpgradeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(passed.opportunity_score, 91)
         self.assertIn("High-Value AI Ecosystem Infrastructure", passed.judge_verdict)
         self.assertIn("PASS", passed.judge_verdict)
+        kept = merge_committee(
+            {
+                "title_tr": "Radar",
+                "top_competitors": [
+                    "RakipA (Commercial SaaS)",
+                    "RakipB (Open Source)",
+                    "RakipC (Local TR)",
+                    "RakipD (Extra)",
+                ],
+                "competitor_weakness": "Kurulum uzun.",
+                "search_trend_signal": "Stabil / Niş arama hacmi",
+            },
+            {"opportunity_score": 71, "judge_verdict": "MRR mümkün.", "top_competitors": ["Yok"]},
+        )
+        self.assertEqual(
+            kept.top_competitors,
+            ["RakipA (Commercial SaaS)", "RakipB (Open Source)", "RakipC (Local TR)"],
+        )
+        self.assertEqual(kept.competitor_weakness, "Kurulum uzun.")
+        filled = merge_committee(
+            {"title_tr": "Radar"},
+            {
+                "opportunity_score": 71,
+                "top_competitors": "RakipA (Commercial SaaS) | RakipB (Open Source)",
+                "competitor_weakness": "Pahalı.",
+                "search_trend_signal": "Sinyal belirsiz",
+            },
+        )
+        self.assertEqual(
+            filled.top_competitors,
+            ["RakipA (Commercial SaaS)", "RakipB (Open Source)"],
+        )
+        self.assertEqual(filled.search_trend_signal, "Sinyal belirsiz")
         quiet = market_dial(fetched=8, sources=1, engaged=0)
         self.assertLess(quiet, 0.60)
         self.assertGreaterEqual(quiet, 0.50)

@@ -85,4 +85,7 @@ class ReactionTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn("telegram_message_id", names)
             self.assertIn("judge_verdict", names)
             self.assertIn("market_dial", names)
+            self.assertIn("top_competitors", names)
+            self.assertIn("competitor_weakness", names)
+            self.assertIn("search_trend_signal", names)
             await db.close()
