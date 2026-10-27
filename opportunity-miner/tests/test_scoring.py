@@ -14,6 +14,7 @@ from filtering.classifier import (
     GeminiClassifier,
     build_batched_prompt,
     classification_from_payload,
+    gemini_model_id,
     score_from_flags,
 )
 from filtering.heuristic import heuristic_reject
@@ -134,6 +135,9 @@ class ScoringTests(unittest.IsolatedAsyncioTestCase):
             else:
                 os.environ["GEMINI_MODEL"] = previous
         self.assertEqual(loaded.gemini_model, "gemini-2.0-flash")
+        self.assertEqual(gemini_model_id("models/gemini-1.5-flash"), "gemini-1.5-flash")
+        self.assertEqual(Settings(gemini_model="models/gemini-2.5-flash").gemini_model, "gemini-2.5-flash")
+        self.assertEqual(Settings(gemini_model="").gemini_model, "gemini-1.5-flash")
 
     def test_generate_sync_calls_genai_and_drops_json_mime_when_rejected(self) -> None:
         calls: list[dict] = []
@@ -152,6 +156,26 @@ class ScoringTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(calls[0]["contents"], "hello")
         self.assertEqual(calls[0]["config"]["response_mime_type"], "application/json")
         self.assertNotIn("response_mime_type", calls[1]["config"])
+
+    def test_missing_model_strips_prefix_and_tries_flash_fallback(self) -> None:
+        calls: list[str] = []
+
+        class Missing(Exception):
+            status_code = 404
+
+        class Models:
+            def generate_content(self, *, model, contents, config):
+                calls.append(model)
+                if model.startswith("models/"):
+                    raise AssertionError(model)
+                if model == "gemini-1.5-flash":
+                    raise Missing("404 NOT_FOUND")
+                return type("Response", (), {"text": "{\"is_human\": true}"})()
+
+        classifier = GeminiClassifier(Settings(gemini_api_key="k", gemini_model="models/gemini-1.5-flash"))
+        classifier._client = type("Client", (), {"models": Models()})()
+        self.assertEqual(classifier._generate_sync("hello"), "{\"is_human\": true}")
+        self.assertEqual(calls, ["gemini-1.5-flash", "gemini-2.5-flash"])
 
     def test_gold_fixture_clears_the_default_gate(self) -> None:
         self.assertTrue(gold_classification().passes(70))

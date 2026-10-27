@@ -125,6 +125,14 @@ class Settings(BaseModel):
             raise ValueError("port must be between 1 and 65535")
         return value
 
+    @field_validator("gemini_model")
+    @classmethod
+    def _gemini_model(cls, value: str) -> str:
+        raw = (value or "").strip()
+        while raw.startswith("models/"):
+            raw = raw.removeprefix("models/")
+        return raw or "gemini-1.5-flash"
+
     @field_validator("classifier_mode")
     @classmethod
     def _mode(cls, value: str) -> str:

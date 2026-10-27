@@ -45,6 +45,24 @@ ATOMIC_QUESTIONS: tuple[tuple[str, str], ...] = (
 
 _REQUIRED = ("is_human", "has_signal", "is_relevant", "should_forward")
 _FLAG_KEYS = tuple(key for key, _question in ATOMIC_QUESTIONS)
+_FALLBACK_MODELS = ("gemini-1.5-flash", "gemini-2.5-flash")
+
+
+def gemini_model_id(name: str | None) -> str:
+    """Bare id for google.genai. The client adds `models/` itself."""
+    raw = (name or "").strip()
+    while raw.startswith("models/"):
+        raw = raw.removeprefix("models/")
+    return raw or _FALLBACK_MODELS[0]
+
+
+def gemini_model_candidates(name: str | None) -> list[str]:
+    chosen = gemini_model_id(name)
+    ordered = [chosen]
+    for fallback in _FALLBACK_MODELS:
+        if fallback not in ordered:
+            ordered.append(fallback)
+    return ordered
 
 
 def render_post(post: RawPost, limit: int = 3500) -> str:
@@ -210,28 +228,45 @@ class GeminiClassifier:
 
     def _generate_sync(self, prompt: str) -> str:
         client = self._sdk()
+        last: Exception | None = None
+        for model in gemini_model_candidates(self.settings.gemini_model):
+            try:
+                text = self._complete(client, model, prompt)
+            except Exception as exc:
+                last = exc
+                if _model_missing(exc):
+                    logger.warning("gemini model %s was not found; trying the next id", model)
+                    continue
+                raise
+            if text.strip():
+                return text
+            last = RuntimeError(
+                f"empty response from {model}. "
+                "If Gemini 1.5 Flash is retired, set GEMINI_MODEL=gemini-2.5-flash."
+            )
+        if last is not None:
+            raise last
+        raise RuntimeError("no Gemini model id to call")
+
+    def _complete(self, client, model: str, prompt: str) -> str:
         try:
             response = client.models.generate_content(
-                model=self.settings.gemini_model,
+                model=model,
                 contents=prompt,
                 config={"temperature": 0, "response_mime_type": "application/json"},
             )
         except Exception as exc:
+            if _model_missing(exc):
+                raise
             message = str(exc).lower()
             if "mime" not in message and "json" not in message and "schema" not in message:
                 raise
             response = client.models.generate_content(
-                model=self.settings.gemini_model,
+                model=model,
                 contents=prompt,
                 config={"temperature": 0},
             )
-        text = getattr(response, "text", None) or ""
-        if not text.strip():
-            raise RuntimeError(
-                f"empty response from {self.settings.gemini_model}. "
-                "If Gemini 1.5 Flash is retired, set GEMINI_MODEL to a current free-tier id."
-            )
-        return text
+        return getattr(response, "text", None) or ""
 
     def _sdk(self):
         if self._client is None:
@@ -239,3 +274,13 @@ class GeminiClassifier:
 
             self._client = genai.Client(api_key=self.settings.gemini_api_key)
         return self._client
+
+
+def _model_missing(exc: Exception) -> bool:
+    code = getattr(exc, "code", None)
+    if code is None:
+        code = getattr(exc, "status_code", None)
+    if code == 404:
+        return True
+    message = str(exc).lower()
+    return "not_found" in message or "not found" in message
