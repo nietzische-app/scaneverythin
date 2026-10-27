@@ -6,6 +6,8 @@ rejects the markup, the same card is sent once as plain text.
 
 from __future__ import annotations
 
+import asyncio
+import json
 import logging
 import re
 
@@ -13,11 +15,13 @@ import httpx
 
 from config import Settings
 from database.models import InsightView
+from ingestion.domain_checker import LABELS
 
 logger = logging.getLogger(__name__)
 
 _MD_SPECIAL = re.compile(r"([_*\[\]()~`>#+\-=|{}.!\\])")
-_API = "https://api.telegram.org/bot{token}/sendMessage"
+_API = "https://api.telegram.org/bot{token}/{method}"
+_MVP_LABEL = "🚀 Cursor MVP Prompt"
 
 
 def escape_md(value: object) -> str:
@@ -62,14 +66,83 @@ def _summary_blocks(analysis: dict, *, markdown: bool) -> list[str]:
     return lines
 
 
+def _domain_line(analysis: dict, *, markdown: bool) -> str:
+    rows = analysis.get("_domains")
+    if not rows:
+        names = analysis.get("suggested_domains") or []
+        if not isinstance(names, list) or not names:
+            return ""
+        rows = [{"name": name, "status": "unknown"} for name in names[:2]]
+    parts = []
+    for row in rows[:2]:
+        if not isinstance(row, dict):
+            continue
+        name = str(row.get("name") or "").strip()
+        if not name:
+            continue
+        label = LABELS.get(str(row.get("status") or ""), LABELS["unknown"])
+        parts.append(f"{name} ({label})")
+    if not parts:
+        return ""
+    text = " | ".join(parts)
+    if markdown:
+        return f"🌐 *Önerilen Domainler:* {escape_md(text)}"
+    return f"🌐 Önerilen Domainler: {text}"
+
+
+def mvp_keyboard(insight_id: int) -> dict:
+    return {
+        "inline_keyboard": [
+            [{"text": _MVP_LABEL, "callback_data": f"mvp:{int(insight_id)}"}]
+        ]
+    }
+
+
+def mvp_prompt(view: InsightView) -> str:
+    analysis = view.analysis or {}
+    title = str(analysis.get("title_tr") or view.title or "Fırsat")
+    blueprint = analysis.get("blueprint") if isinstance(analysis.get("blueprint"), dict) else {}
+    points = [str(point).strip() for point in (blueprint.get("points") or []) if str(point).strip()]
+    features = "\n".join(f"- {point}" for point in points[:6]) or "- One core user action"
+    return (
+        "You are a senior product engineer. Build a 1-day MVP for this specific idea.\n\n"
+        f"Idea: {title}\n"
+        f"Problem: {_pick(analysis, 'net_problem', 'core_problem_or_mechanic', 'summary_tr')}\n"
+        f"How it works: {_pick(analysis, 'solution_mechanism')}\n"
+        f"Why now: {_pick(analysis, 'why_now')}\n"
+        f"Audience and revenue: {_pick(analysis, 'business_model')}\n"
+        f"Differentiator: {_pick(analysis, 'our_differentiator')}\n"
+        f"Scope:\n{features}\n\n"
+        "Stack (do not substitute):\n"
+        "- Next.js App Router + Tailwind CSS for the UI\n"
+        "- Supabase if auth or multi-user data is required, otherwise SQLite\n"
+        "- FastAPI for any job, webhook, or integration the UI should not own\n\n"
+        "Ship today:\n"
+        "1. One screen that demonstrates the core loop.\n"
+        "2. Persistence for the one record type that makes the loop real.\n"
+        "3. A README with how to run it locally.\n\n"
+        "Do not add billing, admin, or extra products."
+    )
+
+
+def _pick(analysis: dict, *keys: str) -> str:
+    for key in keys:
+        value = str(analysis.get(key) or "").strip()
+        if value:
+            return value
+    return "—"
+
+
 def format_alert(view: InsightView) -> str:
     analysis = view.analysis or {}
     title = analysis.get("title_tr") or view.title
+    domain = _domain_line(analysis, markdown=True)
     lines = [
         f"🚀 *FIRSAT RADARI* \\| Skor: {int(view.opportunity_score)}/100",
         "━━━━━━━━━━━━━━━━━━━━",
         f"📌 *Proje / Fikir:* {escape_md(title)}",
         f"🔗 {md_link('Kaynak Bağlantısı', view.url)}",
+        *([domain] if domain else []),
         "",
         "💡 *Özet & Problem:*",
         *_summary_blocks(analysis, markdown=True),
@@ -90,12 +163,14 @@ def format_alert(view: InsightView) -> str:
 def plain_alert(view: InsightView) -> str:
     analysis = view.analysis or {}
     title = analysis.get("title_tr") or view.title
+    domain = _domain_line(analysis, markdown=False)
     return "\n".join(
         [
             f"🚀 FIRSAT RADARI | Skor: {int(view.opportunity_score)}/100",
             "━━━━━━━━━━━━━━━━━━━━",
             f"📌 Proje / Fikir: {title}",
             f"🔗 {view.url}",
+            *([domain] if domain else []),
             "",
             "💡 Özet & Problem:",
             *_summary_blocks(analysis, markdown=False),
@@ -131,23 +206,95 @@ class TelegramNotifier:
         if not self.available:
             return False
         token = self.settings.telegram_bot_token.strip()
-        url = _API.format(token=token)
+        url = _API.format(token=token, method="sendMessage")
         client = self._client
         close_after = False
         if client is None:
             client = httpx.AsyncClient(timeout=self.settings.request_timeout_seconds)
             close_after = True
         try:
-            sent = await self._post(client, url, format_alert(view), "MarkdownV2")
+            if int(view.opportunity_score) >= 80:
+                photo = await self._card_png(view)
+                if photo:
+                    sent = await self._post_photo(client, token, view, photo)
+                    if sent:
+                        return sent
+                    logger.warning("telegram photo rejected for insight %s; sending text", view.insight_id)
+            markup = mvp_keyboard(view.insight_id)
+            sent = await self._post(client, url, format_alert(view), "MarkdownV2", markup)
             if sent:
                 return sent
             logger.info("telegram markdown rejected for insight %s; sending plain text", view.insight_id)
-            return await self._post(client, url, plain_alert(view), None)
+            return await self._post(client, url, plain_alert(view), None, markup)
         finally:
             if close_after:
                 await client.aclose()
 
-    async def _post(self, client: httpx.AsyncClient, url: str, text: str, parse_mode: str | None) -> int:
+    async def send_text(self, text: str) -> int | bool:
+        if not self.available:
+            return False
+        url = _API.format(token=self.settings.telegram_bot_token.strip(), method="sendMessage")
+        client = self._client
+        close_after = False
+        if client is None:
+            client = httpx.AsyncClient(timeout=self.settings.request_timeout_seconds)
+            close_after = True
+        try:
+            return await self._post(client, url, text[:4096], None, None)
+        finally:
+            if close_after:
+                await client.aclose()
+
+    async def _card_png(self, view: InsightView) -> bytes:
+        try:
+            from delivery.card_generator import render_card
+
+            png = await asyncio.to_thread(render_card, view)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("card image skipped: %s", exc)
+            return b""
+        if not png.startswith(b"\x89PNG"):
+            logger.warning("card image skipped: renderer did not return a PNG")
+            return b""
+        return png
+
+    async def _post_photo(self, client: httpx.AsyncClient, token: str, view: InsightView, png: bytes) -> int:
+        url = _API.format(token=token, method="sendPhoto")
+        markup = json.dumps(mvp_keyboard(view.insight_id), ensure_ascii=False)
+        markdown = format_alert(view)
+        attempts: list[tuple[str, str | None]] = [(plain_alert(view)[:1024], None)]
+        if len(markdown) <= 1024:
+            attempts.insert(0, (markdown, "MarkdownV2"))
+        for caption, parse_mode in attempts:
+            data: dict[str, str] = {
+                "chat_id": self.settings.telegram_chat_id,
+                "caption": caption,
+                "reply_markup": markup,
+            }
+            if parse_mode:
+                data["parse_mode"] = parse_mode
+            try:
+                response = await client.post(
+                    url,
+                    data=data,
+                    files={"photo": ("card.png", png, "image/png")},
+                )
+            except httpx.HTTPError as exc:
+                logger.warning("telegram photo request failed: %s", exc)
+                return 0
+            if response.status_code == 200:
+                return _message_id(response)
+            logger.warning("telegram photo status %s: %s", response.status_code, response.text[:300])
+        return 0
+
+    async def _post(
+        self,
+        client: httpx.AsyncClient,
+        url: str,
+        text: str,
+        parse_mode: str | None,
+        reply_markup: dict | None = None,
+    ) -> int:
         payload: dict[str, object] = {
             "chat_id": self.settings.telegram_chat_id,
             "text": text[:4096],
@@ -155,19 +302,89 @@ class TelegramNotifier:
         }
         if parse_mode:
             payload["parse_mode"] = parse_mode
+        if reply_markup:
+            payload["reply_markup"] = reply_markup
         try:
             response = await client.post(url, json=payload)
         except httpx.HTTPError as exc:
             logger.warning("telegram request failed: %s", exc)
             return 0
         if response.status_code == 200:
-            result = response.json().get("result") or {}
-            try:
-                return int(result.get("message_id") or 0)
-            except (TypeError, ValueError):
-                return 0
+            return _message_id(response)
         logger.warning("telegram status %s: %s", response.status_code, response.text[:300])
         return 0
+
+
+def _message_id(response: httpx.Response) -> int:
+    result = response.json().get("result") or {}
+    try:
+        return int(result.get("message_id") or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def callback_insight_id(update: dict, chat_id: str) -> int | None:
+    """Return the insight id for an MVP button tap in the configured chat."""
+    query = update.get("callback_query")
+    if not isinstance(query, dict):
+        return None
+    message = query.get("message") or {}
+    chat = message.get("chat") or {}
+    if str(chat.get("id")) != str(chat_id).strip():
+        return None
+    data = str(query.get("data") or "")
+    if not data.startswith("mvp:"):
+        return None
+    try:
+        return int(data.split(":", 1)[1])
+    except (TypeError, ValueError):
+        return None
+
+
+async def handle_callback(settings: Settings, db, update: dict, client: httpx.AsyncClient) -> bool:
+    """Answer the button and send a tailored MVP prompt. Failures stay in the log."""
+    query = update.get("callback_query") if isinstance(update, dict) else None
+    if not isinstance(query, dict):
+        return False
+    insight_id = callback_insight_id(update, settings.telegram_chat_id)
+    if insight_id is None and _callback_chat(query) != str(settings.telegram_chat_id).strip():
+        return False
+    token = settings.telegram_bot_token.strip()
+    if not token:
+        return False
+    base = f"https://api.telegram.org/bot{token}"
+    query_id = query.get("id")
+    if query_id:
+        try:
+            await client.post(f"{base}/answerCallbackQuery", json={"callback_query_id": query_id})
+        except httpx.HTTPError as exc:
+            logger.warning("telegram callback answer failed: %s", exc)
+    if insight_id is None:
+        return False
+    view = await db.get_insight(insight_id)
+    text = mvp_prompt(view) if view is not None else "Bu fırsat artık kayıtlı değil."
+    try:
+        response = await client.post(
+            f"{base}/sendMessage",
+            json={
+                "chat_id": settings.telegram_chat_id,
+                "text": text[:4096],
+                "disable_web_page_preview": True,
+            },
+        )
+    except httpx.HTTPError as exc:
+        logger.warning("mvp prompt send failed: %s", exc)
+        return False
+    if response.status_code != 200:
+        logger.warning("mvp prompt status %s: %s", response.status_code, response.text[:300])
+        return False
+    return view is not None
+
+
+def _callback_chat(query: dict) -> str:
+    message = query.get("message") or {}
+    chat = message.get("chat") or {}
+    return str(chat.get("id") or "")
 
 
 _LIKE_EMOJI = {"❤", "❤️", "👍", "🔥"}
@@ -208,12 +425,9 @@ async def apply_reaction(db, settings: Settings, update: dict) -> bool:
 
 
 async def poll_reactions(settings: Settings, db, stop) -> None:
-    """Long-poll message_reaction updates until stop is set."""
+    """Long-poll reaction and MVP-button updates until stop is set."""
     if not settings.telegram_configured:
         return
-    import asyncio
-    import json
-
     url = f"https://api.telegram.org/bot{settings.telegram_bot_token.strip()}/getUpdates"
     offset: int | None = None
     logger.info("listening for telegram reactions")
@@ -221,7 +435,7 @@ async def poll_reactions(settings: Settings, db, stop) -> None:
         while not stop.is_set():
             params: dict[str, object] = {
                 "timeout": 25,
-                "allowed_updates": json.dumps(["message_reaction"]),
+                "allowed_updates": json.dumps(["message_reaction", "callback_query"]),
             }
             if offset is not None:
                 params["offset"] = offset
@@ -244,3 +458,5 @@ async def poll_reactions(settings: Settings, db, stop) -> None:
                 except (KeyError, TypeError, ValueError):
                     continue
                 await apply_reaction(db, settings, update)
+                if isinstance(update, dict) and update.get("callback_query"):
+                    await handle_callback(settings, db, update, client)

@@ -92,6 +92,7 @@ class Opportunity(BaseModel):
     net_problem: str = ""
     solution_mechanism: str = ""
     why_now: str = ""
+    suggested_domains: list[str] = Field(default_factory=list)
     opportunity_score: int = 0
 
 
@@ -145,6 +146,7 @@ class InsightView(BaseModel):
     opportunity_score: int
     analysis: dict[str, Any]
     telegram_sent: int
+    user_liked: int = 0
     created_at: str
 
 
@@ -195,6 +197,7 @@ def opportunity_from_payload(payload: dict[str, Any]) -> Opportunity:
         first_slice=clip(str(vibe_raw.get("first_slice") or ""), 400),
     )
     score = clamp_int(payload.get("opportunity_score"), 0, 100, market.fit_score)
+    domains = _suggested_domains(payload)
     title = clip(str(payload.get("title_tr") or "").strip(), 180) or "İsimsiz fırsat"
     return Opportunity(
         title_tr=title,
@@ -215,8 +218,29 @@ def opportunity_from_payload(payload: dict[str, Any]) -> Opportunity:
         net_problem=clip(str(payload.get("net_problem") or "").strip(), 600),
         solution_mechanism=clip(str(payload.get("solution_mechanism") or "").strip(), 600),
         why_now=clip(str(payload.get("why_now") or "").strip(), 600),
+        suggested_domains=domains,
         opportunity_score=score,
     )
+
+
+def _suggested_domains(payload: dict[str, Any]) -> list[str]:
+    raw = payload.get("suggested_domains") or []
+    if isinstance(raw, str):
+        raw = [part for chunk in raw.split(",") for part in chunk.split("|")]
+    found: list[str] = []
+    for item in raw:
+        name = str(item).strip().lower()
+        for prefix in ("https://", "http://"):
+            if name.startswith(prefix):
+                name = name[len(prefix) :]
+        name = name.split("/")[0].strip().strip(".")
+        if not name or " " in name or "." not in name or len(name) > 80:
+            continue
+        if name not in found:
+            found.append(name)
+        if len(found) == 2:
+            break
+    return found
 
 
 def dumps(payload: dict[str, Any] | BaseModel) -> str:

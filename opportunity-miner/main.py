@@ -64,17 +64,22 @@ def create_app(
         scheduler = None
         if settings.scheduler_enabled:
             scheduler = asyncio.create_task(_scheduler(coordinator, settings))
+        from delivery.digest import digest_loop
         from delivery.telegram_bot import poll_reactions
 
-        reaction_stop = asyncio.Event()
-        reactions = asyncio.create_task(poll_reactions(settings, db, reaction_stop))
+        background_stop = asyncio.Event()
+        reactions = asyncio.create_task(poll_reactions(settings, db, background_stop))
+        digest = asyncio.create_task(digest_loop(settings, db, service.notifier, background_stop))
         try:
             yield
         finally:
-            reaction_stop.set()
+            background_stop.set()
             reactions.cancel()
+            digest.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await reactions
+            with contextlib.suppress(asyncio.CancelledError):
+                await digest
             if scheduler is not None:
                 scheduler.cancel()
                 with contextlib.suppress(asyncio.CancelledError):
@@ -170,11 +175,35 @@ def create_app(
 
     @app.post("/telegram/webhook")
     async def telegram_webhook(request: Request) -> dict:
-        from delivery.telegram_bot import apply_reaction
+        import httpx
+
+        from delivery.telegram_bot import apply_reaction, handle_callback
 
         update = await request.json()
-        liked = await apply_reaction(request.app.state.db, request.app.state.settings, update)
-        return {"ok": True, "liked": liked}
+        if not isinstance(update, dict):
+            return {"ok": True, "liked": False, "mvp": False}
+        current: Settings = request.app.state.settings
+        db: Database = request.app.state.db
+        liked = await apply_reaction(db, current, update)
+        mvp = False
+        if update.get("callback_query"):
+            async with httpx.AsyncClient(timeout=current.request_timeout_seconds) as client:
+                mvp = await handle_callback(current, db, update, client)
+        return {"ok": True, "liked": liked, "mvp": mvp}
+
+    @app.post("/run-digest")
+    async def run_digest(
+        request: Request,
+        days: int = Query(default=1, ge=1, le=7),
+        authorization: str | None = Header(default=None),
+    ):
+        current: Settings = request.app.state.settings
+        if not _authorized(current, authorization):
+            raise HTTPException(status_code=401, detail="missing or invalid bearer token")
+        from delivery.digest import send_digest
+
+        sent = await send_digest(request.app.state.db, request.app.state.service.notifier, days=days)
+        return {"ok": True, "sent": sent, "days": days}
 
     @app.post("/run-scan")
     async def run_scan(

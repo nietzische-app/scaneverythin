@@ -56,6 +56,11 @@ CREATE TABLE IF NOT EXISTS insights (
 CREATE INDEX IF NOT EXISTS idx_insights_score
     ON insights(opportunity_score DESC, created_at DESC);
 
+CREATE TABLE IF NOT EXISTS app_state (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS scan_runs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     started_at TEXT NOT NULL,
@@ -64,6 +69,24 @@ CREATE TABLE IF NOT EXISTS scan_runs (
     stats_json TEXT,
     error TEXT
 );
+"""
+
+_INSIGHT_SELECT = """
+    SELECT
+        i.id AS insight_id,
+        i.item_id AS item_id,
+        s.source AS source,
+        s.title AS title,
+        s.url AS url,
+        s.author AS author,
+        i.confidence AS confidence,
+        i.opportunity_score AS opportunity_score,
+        i.analysis_json AS analysis_json,
+        i.telegram_sent AS telegram_sent,
+        i.user_liked AS user_liked,
+        i.created_at AS created_at
+    FROM insights i
+    JOIN scanned_items s ON s.id = i.item_id
 """
 
 _ITEM_COLUMNS = (
@@ -261,21 +284,7 @@ class Database:
         return int(cursor.lastrowid or 0)
 
     async def list_insights(self, limit: int = 20) -> list[InsightView]:
-        sql = """
-            SELECT
-                i.id AS insight_id,
-                i.item_id AS item_id,
-                s.source AS source,
-                s.title AS title,
-                s.url AS url,
-                s.author AS author,
-                i.confidence AS confidence,
-                i.opportunity_score AS opportunity_score,
-                i.analysis_json AS analysis_json,
-                i.telegram_sent AS telegram_sent,
-                i.created_at AS created_at
-            FROM insights i
-            JOIN scanned_items s ON s.id = i.item_id
+        sql = _INSIGHT_SELECT + """
             ORDER BY i.opportunity_score DESC, i.created_at DESC
             LIMIT ?
         """
@@ -283,22 +292,41 @@ class Database:
             rows = await cursor.fetchall()
         return [_insight(row) for row in rows]
 
+    async def get_insight(self, insight_id: int) -> InsightView | None:
+        sql = _INSIGHT_SELECT + " WHERE i.id = ?"
+        async with self.conn.execute(sql, (insight_id,)) as cursor:
+            row = await cursor.fetchone()
+        return None if row is None else _insight(row)
+
+    async def top_digest(self, *, since_iso: str, limit: int = 3) -> list[InsightView]:
+        """Liked rows, or any row scored above 75, inside the window. Highest score first."""
+        sql = _INSIGHT_SELECT + """
+            WHERE (i.user_liked = 1 OR i.opportunity_score > 75)
+              AND i.created_at >= ?
+            ORDER BY i.opportunity_score DESC, i.user_liked DESC, i.created_at DESC
+            LIMIT ?
+        """
+        async with self.conn.execute(sql, (since_iso, limit)) as cursor:
+            rows = await cursor.fetchall()
+        return [_insight(row) for row in rows]
+
+    async def get_state(self, key: str) -> str | None:
+        async with self.conn.execute("SELECT value FROM app_state WHERE key = ?", (key,)) as cursor:
+            row = await cursor.fetchone()
+        return None if row is None else str(row["value"])
+
+    async def set_state(self, key: str, value: str) -> None:
+        await self.conn.execute(
+            """
+            INSERT INTO app_state (key, value) VALUES (?, ?)
+            ON CONFLICT(key) DO UPDATE SET value = excluded.value
+            """,
+            (key, value),
+        )
+        await self.conn.commit()
+
     async def pending_notifications(self, limit: int = 20) -> list[InsightView]:
-        sql = """
-            SELECT
-                i.id AS insight_id,
-                i.item_id AS item_id,
-                s.source AS source,
-                s.title AS title,
-                s.url AS url,
-                s.author AS author,
-                i.confidence AS confidence,
-                i.opportunity_score AS opportunity_score,
-                i.analysis_json AS analysis_json,
-                i.telegram_sent AS telegram_sent,
-                i.created_at AS created_at
-            FROM insights i
-            JOIN scanned_items s ON s.id = i.item_id
+        sql = _INSIGHT_SELECT + """
             WHERE i.telegram_sent = 0
             ORDER BY i.opportunity_score DESC, i.id ASC
             LIMIT ?
@@ -453,5 +481,6 @@ def _insight(row: aiosqlite.Row) -> InsightView:
         opportunity_score=row["opportunity_score"],
         analysis=analysis,
         telegram_sent=row["telegram_sent"],
+        user_liked=int(row["user_liked"] or 0),
         created_at=row["created_at"],
     )

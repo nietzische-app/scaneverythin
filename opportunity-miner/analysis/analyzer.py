@@ -39,7 +39,8 @@ SYSTEM_PROMPT = (
     "solution_mechanism: Bu yazılım problemi tam olarak nasıl çözüyor? "
     "why_now: Pazardaki güncel fırsat veya trend nedir? "
     "Provide an 'opportunity_score' strictly between 0 and 100 based on SaaS / business potential. "
-    "Return that score as an integer."
+    "Return that score as an integer. "
+    "suggested_domains: exactly 2 short catchy domains, each a single hostname such as slug.io, slug.app, or slug.com."
 )
 
 

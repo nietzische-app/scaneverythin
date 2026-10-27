@@ -16,6 +16,7 @@ from filtering.classifier import GeminiClassifier
 from filtering.heuristic import heuristic_reject
 from ingestion import build_fetchers
 from ingestion.base import FetchBatch, Fetcher
+from ingestion.domain_checker import check_domains
 from textutil import attempt_count, attempt_note, clip, utcnow_iso
 
 logger = logging.getLogger(__name__)
@@ -282,6 +283,7 @@ class ScanService:
                 continue
             if not self.notifier.available:
                 continue
+            await attach_domains(view)
             try:
                 sent = await self.notifier.send(view)
             except Exception as exc:  # noqa: BLE001
@@ -319,6 +321,24 @@ class ScanService:
         async with self._report_lock:
             if len(report.item_errors) < 40:
                 report.item_errors.append(clip(message, 300))
+
+
+async def attach_domains(view: InsightView) -> None:
+    """Stamp DNS status onto the card. A failed lookup leaves the card unchanged."""
+    analysis = view.analysis or {}
+    names = analysis.get("suggested_domains") or []
+    if not isinstance(names, list):
+        return
+    cleaned = [str(name).strip() for name in names[:2] if str(name).strip()]
+    if not cleaned:
+        return
+    try:
+        checked = await check_domains(cleaned)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("domain check skipped: %s", exc)
+        return
+    analysis["_domains"] = checked
+    view.analysis = analysis
 
 
 class RunOutcome:

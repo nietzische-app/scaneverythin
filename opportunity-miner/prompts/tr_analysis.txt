@@ -15,6 +15,7 @@ Kurallar:
 - Metni doğrudan doğal, profesyonel Türkçe yaz. İngilizce yazıp kelimesi kelimesine çevirme.
 - 2023 sonrası doymuş veya tekelleşmiş AI sarmalayıcıları (standart PDF sohbet, basit metin yeniden yazıcı) için opportunity_score değerini 50'nin altında ver.
 - Kullanıcıya görünen bütün metin alanları Türkçe olsun. JSON anahtarları İngilizce kalsın.
+- suggested_domains: tam 2 kısa ve akılda kalır alan adı. Yalnızca hostname yaz (ornek.io, ornek.app veya ornek.com). Protokol, boşluk veya yol ekleme.
 - Yalnızca aşağıdaki şemaya uyan tek bir JSON nesnesi döndür. Markdown yazma.
 
 {
@@ -46,6 +47,7 @@ Kurallar:
   "tr_market_analysis": "Türkiye'deki yerel rakipler ve boşluk",
   "our_differentiator": "pazarda nasıl öne geçileceği",
   "business_model": "hedef kitle ve gelir modeli",
+  "suggested_domains": ["kisaad.io", "kisaad.app"],
   "opportunity_score": 0
 }
 

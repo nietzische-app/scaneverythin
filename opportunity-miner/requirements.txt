@@ -6,3 +6,4 @@ openai>=1.50
 aiosqlite>=0.20
 python-dotenv>=1.0
 pydantic>=2.9
+pillow>=10
