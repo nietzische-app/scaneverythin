@@ -18,6 +18,7 @@ from tests.support import (
 
 from analysis.analyzer import OpenAIUnavailable
 from config import Settings
+from delivery.telegram_bot import TelegramNotifier
 from database.db import Database
 from database.models import Classification
 from pipeline import ScanCoordinator, ScanService
@@ -44,6 +45,18 @@ class PipelineTests(unittest.IsolatedAsyncioTestCase):
         payload.update(overrides)
         return Settings(**payload)
 
+    def test_missing_telegram_env_logs_an_error(self) -> None:
+        with self.assertLogs("delivery.telegram_bot", level="ERROR") as logs:
+            TelegramNotifier(Settings())
+        text = "\n".join(logs.output)
+        self.assertIn("TELEGRAM_BOT_TOKEN is missing from the environment", text)
+        self.assertIn("TELEGRAM_CHAT_ID is missing from the environment", text)
+        with self.assertLogs("delivery.telegram_bot", level="ERROR") as logs:
+            TelegramNotifier(Settings(telegram_bot_token="123:abc"))
+        text = "\n".join(logs.output)
+        self.assertNotIn("TELEGRAM_BOT_TOKEN", text)
+        self.assertIn("TELEGRAM_CHAT_ID is missing from the environment", text)
+
     async def test_duplicate_hash_and_terminal_status(self) -> None:
         post = sample_post()
         self.assertTrue(await self.db.enqueue(post))
@@ -63,7 +76,10 @@ class PipelineTests(unittest.IsolatedAsyncioTestCase):
             analyzer=analyzer,
             notifier=notifier,
         )
-        first = await service.run()
+        with self.assertLogs("pipeline", level="INFO") as logs:
+            first = await service.run()
+        self.assertIn("Item 1 score: 82, required: 60 - PASSED", "\n".join(logs.output))
+        self.assertNotIn("no ideas met the minimum score", "\n".join(logs.output))
         self.assertEqual(first.analyzed, 1)
         self.assertEqual(first.notified, 1)
         self.assertEqual(analyzer.calls, 1)
@@ -143,7 +159,14 @@ class PipelineTests(unittest.IsolatedAsyncioTestCase):
             analyzer=ScriptedAnalyzer(brief(score=20)),
             notifier=notifier,
         )
-        report = await service.run()
+        with self.assertLogs("pipeline", level="INFO") as logs:
+            report = await service.run()
+        text = "\n".join(logs.output)
+        self.assertIn("Item 1 score: 20, required: 60 - SKIPPED", text)
+        self.assertIn(
+            "Scan completed successfully, but no ideas met the minimum score threshold for Telegram notification.",
+            text,
+        )
         self.assertEqual(report.analyzed, 1)
         self.assertEqual(report.notified, 0)
         self.assertEqual(notifier.sent, [])

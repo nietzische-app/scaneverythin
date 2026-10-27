@@ -100,6 +100,11 @@ class ScanService:
                 report.analyzed,
                 report.notified,
             )
+            if report.notified == 0:
+                logger.info(
+                    "Scan completed successfully, but no ideas met the minimum score "
+                    "threshold for Telegram notification."
+                )
             return report
         except Exception as exc:
             report.finished_at = utcnow_iso()
@@ -262,10 +267,20 @@ class ScanService:
         assert self.notifier is not None
         if not self.notifier.available:
             await self._note(report, "telegram_not_configured")
-            return
+        required = self.settings.notify_min_opportunity_score
         for view in pending:
-            if view.opportunity_score < self.settings.notify_min_opportunity_score:
+            passed = view.opportunity_score >= required
+            logger.info(
+                "Item %s score: %s, required: %s - %s",
+                view.item_id,
+                view.opportunity_score,
+                required,
+                "PASSED" if passed else "SKIPPED",
+            )
+            if not passed:
                 await self.db.set_telegram_state(view.insight_id, 2)
+                continue
+            if not self.notifier.available:
                 continue
             try:
                 sent = await self.notifier.send(view)

@@ -92,6 +92,10 @@ class TelegramNotifier:
         self.settings = settings
         self._client = client
         self._owns_client = client is None
+        if not settings.telegram_bot_token.strip():
+            logger.error("TELEGRAM_BOT_TOKEN is missing from the environment")
+        if not settings.telegram_chat_id.strip():
+            logger.error("TELEGRAM_CHAT_ID is missing from the environment")
 
     @property
     def available(self) -> bool:
