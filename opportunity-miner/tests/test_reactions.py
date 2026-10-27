@@ -83,4 +83,6 @@ class ReactionTests(unittest.IsolatedAsyncioTestCase):
                 names = {row["name"] for row in await cursor.fetchall()}
             self.assertIn("user_liked", names)
             self.assertIn("telegram_message_id", names)
+            self.assertIn("judge_verdict", names)
+            self.assertIn("market_dial", names)
             await db.close()

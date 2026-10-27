@@ -50,6 +50,8 @@ CREATE TABLE IF NOT EXISTS insights (
     telegram_sent INTEGER NOT NULL DEFAULT 0,
     user_liked INTEGER NOT NULL DEFAULT 0,
     telegram_message_id INTEGER,
+    judge_verdict TEXT NOT NULL DEFAULT '',
+    market_dial REAL,
     created_at TEXT NOT NULL
 );
 
@@ -256,13 +258,14 @@ class Database:
         flags_json: str,
         analysis_json: str,
     ) -> int:
+        verdict, dial = _brief_columns(analysis_json)
         try:
             cursor = await self.conn.execute(
                 """
                 INSERT INTO insights (
                     item_id, confidence, opportunity_score, flags_json,
-                    analysis_json, telegram_sent, created_at
-                ) VALUES (?, ?, ?, ?, ?, 0, ?)
+                    analysis_json, telegram_sent, judge_verdict, market_dial, created_at
+                ) VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?)
                 """,
                 (
                     item_id,
@@ -270,6 +273,8 @@ class Database:
                     opportunity_score,
                     flags_json,
                     analysis_json,
+                    verdict,
+                    dial,
                     utcnow_iso(),
                 ),
             )
@@ -389,6 +394,12 @@ class Database:
             )
         if "telegram_message_id" not in names:
             await self.conn.execute("ALTER TABLE insights ADD COLUMN telegram_message_id INTEGER")
+        if "judge_verdict" not in names:
+            await self.conn.execute(
+                "ALTER TABLE insights ADD COLUMN judge_verdict TEXT NOT NULL DEFAULT ''"
+            )
+        if "market_dial" not in names:
+            await self.conn.execute("ALTER TABLE insights ADD COLUMN market_dial REAL")
 
     async def notification_count(self, state: int) -> int:
         async with self.conn.execute(
@@ -446,6 +457,24 @@ class Database:
             "stats": stats,
             "error": row["error"],
         }
+
+
+def _brief_columns(analysis_json: str) -> tuple[str, float | None]:
+    try:
+        payload = json.loads(analysis_json or "{}")
+    except json.JSONDecodeError:
+        return "", None
+    if not isinstance(payload, dict):
+        return "", None
+    verdict = clip(str(payload.get("judge_verdict") or "").strip(), 2000)
+    raw_dial = payload.get("market_dial")
+    if raw_dial is None or raw_dial == "":
+        return verdict, None
+    try:
+        dial = float(raw_dial)
+    except (TypeError, ValueError):
+        return verdict, None
+    return verdict, max(0.50, min(1.00, dial))
 
 
 def _item(row: aiosqlite.Row) -> ItemRecord:

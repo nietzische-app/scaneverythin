@@ -1,4 +1,7 @@
-"""Product Hunt launch feed via the public RSS endpoint."""
+"""Product Hunt daily launches via the public RSS feed.
+
+Every scan polls `producthunt_feed_url` (default https://www.producthunt.com/feed).
+"""
 
 from __future__ import annotations
 

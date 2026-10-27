@@ -12,7 +12,7 @@ from pathlib import Path
 import httpx
 from fastapi.testclient import TestClient
 
-from analysis.analyzer import PROMPT_PATH, SYSTEM_PROMPT
+from analysis.analyzer import PROMPT_PATH, SYSTEM_PROMPT, apply_judge_gates
 from config import Settings
 from database.db import Database
 from database.models import InsightView, opportunity_from_payload
@@ -21,6 +21,7 @@ from delivery.digest import digest_due, format_digest, seconds_until_digest, sen
 from delivery.telegram_bot import (
     TelegramNotifier,
     callback_insight_id,
+    grok_prompt,
     handle_callback,
     mvp_keyboard,
     mvp_prompt,
@@ -28,7 +29,7 @@ from delivery.telegram_bot import (
 )
 from ingestion.domain_checker import check_domains
 from main import create_app
-from pipeline import ScanService, attach_domains
+from pipeline import ScanService, attach_domains, market_dial, notify_threshold
 from tests.support import (
     ScriptedAnalyzer,
     ScriptedClassifier,
@@ -92,6 +93,40 @@ class UpgradeTests(unittest.IsolatedAsyncioTestCase):
         view.analysis["project_scale"] = "Yüksek Hype B2C"
         card = plain_alert(view)
         self.assertIn("🏷️ Tip & Ölçek: Yeni & Kopyalanabilir | Yüksek Hype B2C", card)
+        view.analysis["judge_verdict"] = "Açık kaynak alternatifi var, MRR zayıf."
+        self.assertIn("⚖️ Yargıç / Risk Notu:", plain_alert(view))
+        self.assertIn("Açık kaynak alternatifi var, MRR zayıf.", plain_alert(view))
+
+    def test_judge_gates_and_quiet_day_dial(self) -> None:
+        self.assertEqual(apply_judge_gates(90, {"devtool_class": "micro"}), 49)
+        self.assertEqual(apply_judge_gates(90, {"saturated_wrapper": True}), 49)
+        self.assertEqual(apply_judge_gates(70, {"devtool_class": "enterprise"}), 49)
+        self.assertEqual(apply_judge_gates(85, {"devtool_class": "enterprise"}), 85)
+        quiet = market_dial(fetched=8, sources=1, engaged=0)
+        self.assertLess(quiet, 0.60)
+        self.assertGreaterEqual(quiet, 0.50)
+        self.assertEqual(notify_threshold(60, quiet), 75)
+        self.assertEqual(notify_threshold(60, 0.80), 60)
+        self.assertEqual(market_dial(0, 0, 0), 0.75)
+        subs = Settings().reddit_subs
+        for name in (
+            "SaaS",
+            "Entrepreneur",
+            "SmallBusiness",
+            "SideProject",
+            "Ecommerce",
+            "digitalmarketing",
+            "gamedev",
+        ):
+            self.assertIn(name, subs)
+        self.assertEqual(Settings().producthunt_feed_url, "https://www.producthunt.com/feed")
+        prompt = grok_prompt(_view(title="Fatura hatırlatıcı"))
+        self.assertIn("Fatura hatırlatıcı", prompt)
+        self.assertIn("Viral loop", prompt)
+        self.assertIn("Competitor vulnerabilities", prompt)
+        buttons = mvp_keyboard(7)["inline_keyboard"][0]
+        self.assertEqual(buttons[1]["text"], "🤖 Grok ile İncele")
+        self.assertEqual(buttons[1]["callback_data"], "grok:7")
 
     async def test_domain_check_uses_the_injected_resolver(self) -> None:
         def resolve(name: str) -> str:
@@ -327,6 +362,41 @@ class UpgradeTests(unittest.IsolatedAsyncioTestCase):
             finally:
                 pipeline.check_domains = original
             self.assertEqual(view.analysis["_domains"][0]["status"], "open")
+            await db.close()
+
+    async def test_quiet_day_raises_the_notify_bar(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            db = Database(str(Path(tmp) / "radar.sqlite"))
+            await db.connect()
+            posts = [
+                sample_post(
+                    external_id=str(index),
+                    url=f"https://news.ycombinator.com/item?id={index}",
+                    score=0,
+                    comment_count=0,
+                )
+                for index in range(8)
+            ]
+            service = ScanService(
+                Settings(
+                    database_path=db.path,
+                    scheduler_enabled=False,
+                    notify_min_opportunity_score=60,
+                    max_analyses_per_scan=1,
+                ),
+                db,
+                fetchers=[StaticFetcher(posts)],
+                classifier=ScriptedClassifier(gold_classification()),
+                analyzer=ScriptedAnalyzer(brief(score=70)),
+                notifier=ScriptedNotifier(),
+            )
+            with self.assertLogs("pipeline", level="INFO") as logs:
+                report = await service.run()
+            self.assertIn("required: 75", "\n".join(logs.output))
+            self.assertEqual(report.notified, 0)
+            async with db.conn.execute("SELECT market_dial FROM insights") as cursor:
+                row = await cursor.fetchone()
+            self.assertLess(row["market_dial"], 0.60)
             await db.close()
 
     def test_run_digest_uses_the_same_bearer_gate(self) -> None:

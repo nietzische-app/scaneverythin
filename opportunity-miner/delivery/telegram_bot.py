@@ -90,10 +90,17 @@ def _domain_line(analysis: dict, *, markdown: bool) -> str:
     return f"🌐 Önerilen Domainler: {text}"
 
 
+_GROK_LABEL = "🤖 Grok ile İncele"
+
+
 def mvp_keyboard(insight_id: int) -> dict:
+    ident = int(insight_id)
     return {
         "inline_keyboard": [
-            [{"text": _MVP_LABEL, "callback_data": f"mvp:{int(insight_id)}"}]
+            [
+                {"text": _MVP_LABEL, "callback_data": f"mvp:{ident}"},
+                {"text": _GROK_LABEL, "callback_data": f"grok:{ident}"},
+            ]
         ]
     }
 
@@ -122,6 +129,31 @@ def mvp_prompt(view: InsightView) -> str:
         "2. Persistence for the one record type that makes the loop real.\n"
         "3. A README with how to run it locally.\n\n"
         "Do not add billing, admin, or extra products."
+    )
+
+
+def grok_prompt(view: InsightView) -> str:
+    analysis = view.analysis or {}
+    title = str(analysis.get("title_tr") or view.title or "Fırsat")
+    return (
+        "You are Grok, a sharp product strategist. Brainstorm for this specific idea. "
+        "Be concrete. Do not invent metrics.\n\n"
+        f"Idea: {title}\n"
+        f"Type and scale: {_pick(analysis, 'opportunity_type')} | {_pick(analysis, 'project_scale')}\n"
+        f"Market scale: {_pick(analysis, 'market_scale')}\n"
+        f"Problem: {_pick(analysis, 'net_problem', 'core_problem_or_mechanic', 'summary_tr')}\n"
+        f"How it works: {_pick(analysis, 'solution_mechanism')}\n"
+        f"Why now: {_pick(analysis, 'why_now')}\n"
+        f"TR market: {_pick(analysis, 'tr_market_analysis')}\n"
+        f"Differentiator: {_pick(analysis, 'our_differentiator')}\n"
+        f"Audience and revenue: {_pick(analysis, 'business_model')}\n"
+        f"Judge verdict: {_pick(analysis, 'judge_verdict')}\n"
+        f"Score: {int(view.opportunity_score)}/100\n\n"
+        "Answer in three short sections:\n"
+        "1. Positioning: the one sentence this product should own, and who it is not for.\n"
+        "2. Viral loop: the action that brings the next user, and the first message they send.\n"
+        "3. Competitor vulnerabilities: two specific weaknesses a buyer already feels, "
+        "and how this product hits them."
     )
 
 
@@ -164,6 +196,9 @@ def format_alert(view: InsightView) -> str:
         "",
         "🎯 *Hedef Kitle & Gelir Modeli:*",
         escape_md(_field(analysis, "business_model")),
+        "",
+        "⚖️ *Yargıç / Risk Notu:*",
+        escape_md(_field(analysis, "judge_verdict")),
         "━━━━━━━━━━━━━━━━━━━━",
     ]
     return "\n".join(lines).strip()
@@ -193,6 +228,9 @@ def plain_alert(view: InsightView) -> str:
             "",
             "🎯 Hedef Kitle & Gelir Modeli:",
             _field(analysis, "business_model"),
+            "",
+            "⚖️ Yargıç / Risk Notu:",
+            _field(analysis, "judge_verdict"),
             "━━━━━━━━━━━━━━━━━━━━",
         ]
     ).strip()[:3900]
@@ -333,8 +371,8 @@ def _message_id(response: httpx.Response) -> int:
         return 0
 
 
-def callback_insight_id(update: dict, chat_id: str) -> int | None:
-    """Return the insight id for an MVP button tap in the configured chat."""
+def callback_action(update: dict, chat_id: str) -> tuple[str, int] | None:
+    """Return `(mvp|grok, insight id)` for a button tap in the configured chat."""
     query = update.get("callback_query")
     if not isinstance(query, dict):
         return None
@@ -342,13 +380,21 @@ def callback_insight_id(update: dict, chat_id: str) -> int | None:
     chat = message.get("chat") or {}
     if str(chat.get("id")) != str(chat_id).strip():
         return None
-    data = str(query.get("data") or "")
-    if not data.startswith("mvp:"):
+    kind, _, raw_id = str(query.get("data") or "").partition(":")
+    if kind not in {"mvp", "grok"}:
         return None
     try:
-        return int(data.split(":", 1)[1])
+        return kind, int(raw_id)
     except (TypeError, ValueError):
         return None
+
+
+def callback_insight_id(update: dict, chat_id: str) -> int | None:
+    """Return the insight id for an MVP button tap in the configured chat."""
+    action = callback_action(update, chat_id)
+    if action is None or action[0] != "mvp":
+        return None
+    return action[1]
 
 
 async def handle_callback(settings: Settings, db, update: dict, client: httpx.AsyncClient) -> bool:
@@ -356,8 +402,8 @@ async def handle_callback(settings: Settings, db, update: dict, client: httpx.As
     query = update.get("callback_query") if isinstance(update, dict) else None
     if not isinstance(query, dict):
         return False
-    insight_id = callback_insight_id(update, settings.telegram_chat_id)
-    if insight_id is None and _callback_chat(query) != str(settings.telegram_chat_id).strip():
+    action = callback_action(update, settings.telegram_chat_id)
+    if action is None and _callback_chat(query) != str(settings.telegram_chat_id).strip():
         return False
     token = settings.telegram_bot_token.strip()
     if not token:
@@ -369,10 +415,16 @@ async def handle_callback(settings: Settings, db, update: dict, client: httpx.As
             await client.post(f"{base}/answerCallbackQuery", json={"callback_query_id": query_id})
         except httpx.HTTPError as exc:
             logger.warning("telegram callback answer failed: %s", exc)
-    if insight_id is None:
+    if action is None:
         return False
+    kind, insight_id = action
     view = await db.get_insight(insight_id)
-    text = mvp_prompt(view) if view is not None else "Bu fırsat artık kayıtlı değil."
+    if view is None:
+        text = "Bu fırsat artık kayıtlı değil."
+    elif kind == "grok":
+        text = grok_prompt(view)
+    else:
+        text = mvp_prompt(view)
     try:
         response = await client.post(
             f"{base}/sendMessage",

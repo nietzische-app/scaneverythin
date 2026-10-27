@@ -74,6 +74,12 @@ class ScanService:
         self._openai_blocked = False
         self._slot_lock = asyncio.Lock()
         self._report_lock = asyncio.Lock()
+        self._intake_posts = 0
+        self._intake_sources: set[str] = set()
+        self._intake_engaged = 0
+
+    def current_dial(self) -> float:
+        return market_dial(self._intake_posts, len(self._intake_sources), self._intake_engaged)
 
     async def aclose(self) -> None:
         closer = getattr(self.analyzer, "aclose", None)
@@ -86,6 +92,9 @@ class ScanService:
         run_id = await self.db.start_run(started)
         self._analysis_slots = self.settings.max_analyses_per_scan
         self._openai_blocked = False
+        self._intake_posts = 0
+        self._intake_sources = set()
+        self._intake_engaged = 0
         try:
             await self._fetch(report)
             await self._analyze_pending(report)
@@ -135,6 +144,12 @@ class ScanService:
             for error in batch.errors:
                 if error not in report.source_errors:
                     report.source_errors.append(error)
+        if batch.posts:
+            self._intake_sources.add(batch.source)
+        for post in batch.posts:
+            self._intake_posts += 1
+            if (post.score or 0) >= 10 or (post.comment_count or 0) >= 5:
+                self._intake_engaged += 1
         for post in batch.posts:
             try:
                 created = await self.db.enqueue(post)
@@ -251,6 +266,7 @@ class ScanService:
         classification = row.classification()
         confidence = classification.confidence if classification else 0
         flags = classification.model_dump_json() if classification else "{}"
+        opportunity = opportunity.model_copy(update={"market_dial": self.current_dial()})
         await self.db.add_insight(
             item_id=row.id,
             confidence=confidence,
@@ -268,7 +284,9 @@ class ScanService:
         assert self.notifier is not None
         if not self.notifier.available:
             await self._note(report, "telegram_not_configured")
-        required = self.settings.notify_min_opportunity_score
+        dial = self.current_dial()
+        required = notify_threshold(self.settings.notify_min_opportunity_score, dial)
+        logger.info("market dial %.2f; notify threshold %s", dial, required)
         for view in pending:
             passed = view.opportunity_score >= required
             logger.info(
@@ -321,6 +339,28 @@ class ScanService:
         async with self._report_lock:
             if len(report.item_errors) < 40:
                 report.item_errors.append(clip(message, 300))
+
+
+def market_dial(fetched: int, sources: int, engaged: int) -> float:
+    """0.50–1.00 from how much came in, how many sources spoke, and how strong the posts were.
+
+    An empty fetch stays at 0.75 so a total outage does not tighten the gate.
+    """
+    if fetched <= 0:
+        return 0.75
+    volume = min(1.0, fetched / 40)
+    breadth = min(1.0, sources / 4)
+    signal = engaged / fetched
+    blended = 0.45 * volume + 0.35 * signal + 0.20 * breadth
+    value = 0.50 + 0.50 * blended
+    return max(0.50, min(1.00, round(value, 2)))
+
+
+def notify_threshold(base: int, dial: float) -> int:
+    """A quiet or low-quality day (dial below 0.60) drops marginal ideas."""
+    if dial < 0.60:
+        return max(base, 75)
+    return base
 
 
 async def attach_domains(view: InsightView) -> None:

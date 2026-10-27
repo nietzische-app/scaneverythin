@@ -94,6 +94,9 @@ class Opportunity(BaseModel):
     solution_mechanism: str = ""
     why_now: str = ""
     suggested_domains: list[str] = Field(default_factory=list)
+    market_scale: str = ""
+    judge_verdict: str = ""
+    market_dial: float | None = None
     opportunity_score: int = 0
 
 
@@ -221,6 +224,9 @@ def opportunity_from_payload(payload: dict[str, Any]) -> Opportunity:
         solution_mechanism=clip(str(payload.get("solution_mechanism") or "").strip(), 600),
         why_now=clip(str(payload.get("why_now") or "").strip(), 600),
         suggested_domains=domains,
+        market_scale=_market_scale(payload.get("market_scale")),
+        judge_verdict=clip(str(payload.get("judge_verdict") or "").strip(), 1200),
+        market_dial=_market_dial(payload.get("market_dial")),
         opportunity_score=score,
     )
 
@@ -232,6 +238,38 @@ _TYPE_LABELS = (
 )
 _TYPE_BY_FOLD = {label.casefold(): label for label in _TYPE_LABELS}
 _LEGACY_TYPES = {"micro_saas", "b2b_tool", "indie_game", "content_tool", "other"}
+
+
+_MARKET_SCALES = {
+    "micro": "Micro",
+    "smb": "SMB",
+    "enterprise b2b": "Enterprise B2B",
+    "enterprise_b2b": "Enterprise B2B",
+    "b2c": "B2C",
+}
+
+
+def _market_scale(raw: object) -> str:
+    text = str(raw or "").strip()
+    if not text:
+        return ""
+    key = " ".join(text.casefold().split()).replace("-", " ").replace("_", " ")
+    if key in _MARKET_SCALES:
+        return _MARKET_SCALES[key]
+    slug = key.replace(" ", "_")
+    if slug in _MARKET_SCALES:
+        return _MARKET_SCALES[slug]
+    return clip(text, 40)
+
+
+def _market_dial(raw: object) -> float | None:
+    if raw is None or raw == "":
+        return None
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        return None
+    return max(0.50, min(1.00, round(value, 2)))
 
 
 def _opportunity_type(raw: str) -> str:

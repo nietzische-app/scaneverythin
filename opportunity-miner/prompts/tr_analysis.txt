@@ -16,6 +16,7 @@ Kurallar:
 - 2023 sonrası doymuş veya tekelleşmiş AI sarmalayıcıları (standart PDF sohbet, basit metin yeniden yazıcı) için opportunity_score değerini 50'nin altında ver.
 - Kullanıcıya görünen bütün metin alanları Türkçe olsun. JSON anahtarları İngilizce kalsın.
 - suggested_domains: tam 2 kısa ve akılda kalır alan adı. Yalnızca hostname yaz (ornek.io, ornek.app veya ornek.com). Protokol, boşluk veya yol ekleme.
+- market_scale: tam olarak Micro, SMB, Enterprise B2B veya B2C.
 - Yalnızca aşağıdaki şemaya uyan tek bir JSON nesnesi döndür. Markdown yazma.
 
 {
@@ -27,6 +28,7 @@ Kurallar:
   "core_problem_or_mechanic": "çekirdek problem veya mekanik",
   "opportunity_type": "Yeni & Kopyalanabilir | Zamanının Ötesinde / Yeniden Canlandırılabilir | TR Pazar Fırsatı",
   "project_scale": "Hızlı MVP | Büyük Çaplı B2B Platformu | Yüksek Hype B2C",
+  "market_scale": "Micro | SMB | Enterprise B2B | B2C",
   "turkish_market": {
     "adaptation": "Türkiye'ye nasıl oturur",
     "payments": "iyzico/PayTR notu veya gerekmez",

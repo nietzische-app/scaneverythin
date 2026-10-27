@@ -40,10 +40,10 @@ class _Client:
 
 
 def test_default_model_is_gpt_4o_mini_and_parses_the_brief():
-    seen: dict = {}
+    seen: list[dict] = []
 
     def create(**kwargs):
-        seen.update(kwargs)
+        seen.append(kwargs)
         message = type("Message", (), {"content": _BODY})()
         choice = type("Choice", (), {"message": message})()
         return type("Response", (), {"choices": [choice]})()
@@ -52,10 +52,12 @@ def test_default_model_is_gpt_4o_mini_and_parses_the_brief():
     analyzer._client = _Client(create)
     result = asyncio.run(analyzer.analyze(sample_post()))
 
-    assert seen["model"] == "gpt-4o-mini"
-    assert seen["response_format"] == {"type": "json_object"}
-    system = seen["messages"][0]["content"]
-    assert seen["messages"][0]["role"] == "system"
+    assert len(seen) == 2
+    assert seen[0]["model"] == "gpt-4o-mini"
+    assert seen[1]["response_format"] == {"type": "json_object"}
+    system = "\n".join(call["messages"][0]["content"] for call in seen)
+    assert seen[0]["messages"][0]["role"] == "system"
+    assert "Scout brief JSON" in seen[1]["messages"][1]["content"]
     assert (
         "Provide an 'opportunity_score' strictly between 0 and 100 based on SaaS / business potential."
         in system

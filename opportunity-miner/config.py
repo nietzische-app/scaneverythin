@@ -11,7 +11,16 @@ import os
 from dotenv import load_dotenv
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-_DEFAULT_SUBS = ["SaaS", "IndieHackers", "gamedev", "Showerthoughts"]
+_DEFAULT_SUBS = [
+    "SaaS",
+    "Entrepreneur",
+    "SmallBusiness",
+    "SideProject",
+    "Ecommerce",
+    "digitalmarketing",
+    "IndieHackers",
+    "gamedev",
+]
 _DEFAULT_NITTER = [
     "https://nitter.poast.org",
     "https://nitter.privacydev.net",
