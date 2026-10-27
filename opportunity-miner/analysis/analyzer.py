@@ -40,6 +40,11 @@ SCOUT_PROMPT = (
     "search_trend_signal: a short qualitative search-volume and hype trajectory in Turkish, "
     "for example Son 90 günde %120+ arama hacmi artışı or Stabil / Niş arama hacmi. "
     "Do not invent a percentage the source does not support. If the trajectory is unknown, write Sinyal belirsiz. "
+    "Search for non-obvious, highly inventive, surprisingly clever B2C, B2B, or AI-native opportunities "
+    "that provoke a Why didn't I think of that? reaction. "
+    "aha_angle: 1 or 2 Turkish sentences on exactly why this solution is non-obvious and clever. "
+    "unfair_advantage: the unique moat, growth hook, or distribution trick that makes this hard to beat. "
+    "If the idea is obvious, boring, or generic, say that plainly in aha_angle instead of inventing cleverness. "
     "The summary must be explicit, actionable, and easy to understand. Avoid abstract jargon. "
     "net_problem: Tam olarak kime, ne acı çektiriyor? "
     "solution_mechanism: Bu yazılım problemi tam olarak nasıl çözüyor? "
@@ -86,10 +91,24 @@ JUDGE_PROMPT = (
     "The Scout brief may include top_competitors, competitor_weakness, and search_trend_signal. "
     "Use them when you judge saturation, an open-source alternative, and whether customers will pay. "
     "If the Scout left any of those three empty, fill them. Do not invent a search percentage. "
+    "Apply the Aha! Factor filter. Seek non-obvious, highly inventive B2C, B2B, and AI-native ideas "
+    "that provoke Why didn't I think of that? "
+    "Set obvious true and opportunity_score strictly below 50 for obvious, boring, or generic ideas, even if useful. "
+    "That includes generic PDF summarizers, basic social media schedulers, standard lead-gen scrapers, "
+    "typical AI customer-service bots, and direct first-degree solutions many developers can build immediately. "
+    "aha_pillars uses only these ids: cross_domain, friction_hack, viral, why_now. "
+    "cross_domain: merging two seemingly unrelated workflows, such as automated video rendering triggered by a GitHub pull request. "
+    "friction_hack: a painful, universally tolerated daily routine solved in a counter-intuitive way. "
+    "viral: the product markets itself through its execution flow or a public data trigger. "
+    "why_now: a technical unlock from about the last 6 months (MCP, a newly opened public API, or a recent regulation) "
+    "that was not feasible before. "
+    "A score of 80 or higher requires at least 2 of those pillars. Otherwise keep the score at 79 or below. "
+    "If the Scout left aha_angle or unfair_advantage empty, fill them in Turkish. Do not invent a clever angle for an obvious idea. "
     "Provide an 'opportunity_score' strictly between 0 and 100 based on SaaS / business potential. "
     "Return that score as an integer. "
     "Return JSON with opportunity_score, judge_verdict, saturated_wrapper, open_source_alternative, "
-    "mrr_likely, devtool_class, top_competitors, competitor_weakness, and search_trend_signal."
+    "mrr_likely, devtool_class, top_competitors, competitor_weakness, search_trend_signal, "
+    "obvious, aha_pillars, aha_angle, and unfair_advantage."
 )
 
 # Scout owns the brief the rest of the app already reads. The Judge owns the score.
@@ -251,9 +270,19 @@ def merge_committee(scout: dict, judge: dict) -> Opportunity:
     if judge.get("opportunity_score") is not None:
         payload["opportunity_score"] = judge.get("opportunity_score")
     payload["judge_verdict"] = str(judge.get("judge_verdict") or payload.get("judge_verdict") or "").strip()
-    for key in ("top_competitors", "competitor_weakness", "search_trend_signal"):
+    for key in (
+        "top_competitors",
+        "competitor_weakness",
+        "search_trend_signal",
+        "aha_angle",
+        "unfair_advantage",
+    ):
         if _blank(payload.get(key)) and not _blank(judge.get(key)):
             payload[key] = judge.get(key)
+    if not _blank(judge.get("aha_pillars")):
+        payload["aha_pillars"] = judge.get("aha_pillars")
+    if "obvious" in judge:
+        payload["obvious"] = judge.get("obvious")
     opportunity = opportunity_from_payload(payload)
     gated = apply_judge_gates(opportunity.opportunity_score, judge)
     verdict = _stamp_devtool_verdict(opportunity.judge_verdict, judge, gated)
@@ -284,13 +313,65 @@ def _devtool_kind(judge: dict) -> str:
 def apply_judge_gates(score: int, judge: dict) -> int:
     """Enforce the reject rules in code so a soft model score cannot sneak through."""
     kind = _devtool_kind(judge)
-    if _yes(judge.get("saturated_wrapper")) or kind == "pre_ai":
+    if _yes(judge.get("saturated_wrapper")) or kind == "pre_ai" or is_obvious(judge):
         return min(score, 49)
+    if score >= 80 and aha_pillar_count(judge) < 2:
+        score = 79
     if kind == "ai_infra":
         if score < 80:
             return min(score, 49)
         return min(score, 95)
     return score
+
+
+def clears_aha_bar(score: int, analysis: dict | None) -> bool:
+    """Score 80+ reaches Telegram only with two Aha pillars, and an obvious idea never does."""
+    payload = analysis or {}
+    if is_obvious(payload):
+        return False
+    if int(score) >= 80 and aha_pillar_count(payload) < 2:
+        return False
+    return True
+
+
+def is_obvious(source: object) -> bool:
+    if not isinstance(source, dict):
+        return False
+    if _yes(source.get("obvious")):
+        return True
+    label = " ".join(str(source.get("aha_class") or "").casefold().replace("-", " ").split())
+    return label in {"obvious", "boring", "generic"}
+
+
+def aha_pillar_count(source: object) -> int:
+    raw = source.get("aha_pillars") if isinstance(source, dict) else source
+    if isinstance(raw, str):
+        items = [part.strip() for part in raw.replace(",", "|").split("|")]
+    elif isinstance(raw, list):
+        items = [str(item).strip() for item in raw]
+    else:
+        items = []
+    found: set[str] = set()
+    for item in items:
+        pillar = _pillar_id(item)
+        if pillar:
+            found.add(pillar)
+    return len(found)
+
+
+def _pillar_id(text: str) -> str:
+    key = " ".join(text.casefold().replace("-", " ").replace("_", " ").replace("/", " ").split())
+    if not key:
+        return ""
+    if "cross domain" in key or "arbitrage" in key:
+        return "cross_domain"
+    if "friction" in key:
+        return "friction_hack"
+    if "viral" in key or "organic" in key:
+        return "viral"
+    if "why now" in key or key in {"unlock", "regulation"}:
+        return "why_now"
+    return ""
 
 
 def _stamp_devtool_verdict(verdict: str, judge: dict, score: int) -> str:

@@ -57,6 +57,26 @@ class PipelineTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("TELEGRAM_BOT_TOKEN", text)
         self.assertIn("TELEGRAM_CHAT_ID is missing from the environment", text)
 
+    async def test_high_score_without_two_aha_pillars_is_not_sent(self) -> None:
+        dull = brief(score=88)
+        dull.aha_pillars = []
+        notifier = ScriptedNotifier()
+        service = ScanService(
+            self.settings(),
+            self.db,
+            fetchers=[StaticFetcher([sample_post()])],
+            classifier=ScriptedClassifier(gold_classification()),
+            analyzer=ScriptedAnalyzer(dull),
+            notifier=notifier,
+        )
+        with self.assertLogs("pipeline", level="INFO") as logs:
+            report = await service.run()
+        text = "\n".join(logs.output)
+        self.assertIn("Item 1 score: 88, required: 60 - SKIPPED", text)
+        self.assertIn("Aha filter blocked Telegram", text)
+        self.assertEqual(report.notified, 0)
+        self.assertEqual(notifier.sent, [])
+
     async def test_duplicate_hash_and_terminal_status(self) -> None:
         post = sample_post()
         self.assertTrue(await self.db.enqueue(post))
@@ -79,6 +99,7 @@ class PipelineTests(unittest.IsolatedAsyncioTestCase):
         with self.assertLogs("pipeline", level="INFO") as logs:
             first = await service.run()
         self.assertIn("Item 1 score: 82, required: 60 - PASSED", "\n".join(logs.output))
+        self.assertNotIn("Aha filter blocked", "\n".join(logs.output))
         self.assertNotIn("no ideas met the minimum score", "\n".join(logs.output))
         self.assertEqual(first.analyzed, 1)
         self.assertEqual(first.notified, 1)

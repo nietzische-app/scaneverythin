@@ -20,6 +20,9 @@ Kurallar:
 - top_competitors: 2 veya 3 ana global ya da yerel rakip. Her madde rakip adı ve tahmini model/varlık taşısın, örneğin RakipA (Commercial SaaS) veya RakipB (Open Source).
 - competitor_weakness: mevcut çözümlerdeki ana kullanıcı şikayeti veya boşluk.
 - search_trend_signal: arama hacmi ve hype yönünün nitel değerlendirmesi. Kaynak desteklemiyorsa yüzde uydurma. Bilinmiyorsa "Sinyal belirsiz" yaz.
+- Aha! filtresi: bariz, sıkıcı veya jenerik fikirleri (genel PDF özetleyici, basit sosyal medya planlayıcı, standart lead-gen kazıyıcı, tipik AI müşteri hizmeti botu, herkesin hemen yazacağı birinci derece çözüm) zekice diye yazma.
+- aha_angle: çözümün neden bariz olmadığını 1 veya 2 cümleyle anlat. Barizse bunu açıkça söyle.
+- unfair_advantage: taklidi zorlaştıran hendek, büyüme kancası veya dağıtım numarası.
 - Yalnızca aşağıdaki şemaya uyan tek bir JSON nesnesi döndür. Markdown yazma.
 
 {
@@ -56,6 +59,8 @@ Kurallar:
   "top_competitors": ["RakipA (Commercial SaaS)", "RakipB (Open Source)"],
   "competitor_weakness": "mevcut çözümlerdeki ana şikayet veya boşluk",
   "search_trend_signal": "Stabil / Niş arama hacmi",
+  "aha_angle": "çözümün neden bariz olmadığı",
+  "unfair_advantage": "taklidi zorlaştıran hendek veya dağıtım kancası",
   "suggested_domains": ["kisaad.io", "kisaad.app"],
   "opportunity_score": 0
 }

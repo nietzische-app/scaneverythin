@@ -74,6 +74,9 @@ def brief(score: int = 82, title: str = "Tahsilat hatırlatıcısı") -> Opportu
             first_slice="Tek fatura, tek hatırlatma",
         ),
         risks=["İletiler spam klasörüne düşebilir"],
+        aha_angle="Ödeme işareti gelince hatırlatma kendi kendine susuyor.",
+        unfair_advantage="Her giden mesaj faturanın linkini taşır ve ajans içinde yayılır.",
+        aha_pillars=["friction_hack", "viral"],
         opportunity_score=score,
     )
 

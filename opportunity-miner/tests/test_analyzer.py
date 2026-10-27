@@ -87,6 +87,11 @@ def test_default_model_is_gpt_4o_mini_and_parses_the_brief():
     assert "competitor_weakness" in system
     assert "search_trend_signal" in system
     assert "Sinyal belirsiz" in system
+    assert "Why didn't I think of that?" in system
+    assert "aha_angle" in system
+    assert "unfair_advantage" in system
+    assert "cross_domain" in system
+    assert "strictly below 50" in system
     assert Settings(openai_model="gpt-4o").openai_model == "gpt-4o"
     assert Settings(openai_model="").openai_model == "gpt-4o-mini"
 

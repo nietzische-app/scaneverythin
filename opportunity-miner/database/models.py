@@ -97,6 +97,10 @@ class Opportunity(BaseModel):
     top_competitors: list[str] = Field(default_factory=list)
     competitor_weakness: str = ""
     search_trend_signal: str = ""
+    aha_angle: str = ""
+    unfair_advantage: str = ""
+    aha_pillars: list[str] = Field(default_factory=list)
+    obvious: bool = False
     market_scale: str = ""
     judge_verdict: str = ""
     market_dial: float | None = None
@@ -230,6 +234,10 @@ def opportunity_from_payload(payload: dict[str, Any]) -> Opportunity:
         top_competitors=_top_competitors(payload.get("top_competitors")),
         competitor_weakness=clip(str(payload.get("competitor_weakness") or "").strip(), 900),
         search_trend_signal=clip(str(payload.get("search_trend_signal") or "").strip(), 240),
+        aha_angle=clip(str(payload.get("aha_angle") or "").strip(), 500),
+        unfair_advantage=clip(str(payload.get("unfair_advantage") or "").strip(), 400),
+        aha_pillars=_short_list(payload.get("aha_pillars"), 4, 40),
+        obvious=_flag(payload.get("obvious")),
         market_scale=_market_scale(payload.get("market_scale")),
         judge_verdict=clip(str(payload.get("judge_verdict") or "").strip(), 1200),
         market_dial=_market_dial(payload.get("market_dial")),
@@ -288,6 +296,29 @@ def _opportunity_type(raw: str) -> str:
     if slug in _LEGACY_TYPES:
         return slug
     return clip(raw, 80)
+
+
+def _flag(value: object) -> bool:
+    if isinstance(value, bool):
+        return value
+    return str(value or "").strip().lower() in {"1", "true", "yes", "evet"}
+
+
+def _short_list(raw: object, limit: int, item_len: int) -> list[str]:
+    if isinstance(raw, str):
+        items = [part.strip() for part in raw.replace(",", "|").split("|")]
+    elif isinstance(raw, list):
+        items = [str(item).strip() for item in raw]
+    else:
+        items = []
+    found: list[str] = []
+    for item in items:
+        text = clip(item, item_len)
+        if text and text not in found:
+            found.append(text)
+        if len(found) == limit:
+            break
+    return found
 
 
 def _top_competitors(raw: object) -> list[str]:

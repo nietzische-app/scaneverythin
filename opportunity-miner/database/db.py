@@ -55,6 +55,8 @@ CREATE TABLE IF NOT EXISTS insights (
     top_competitors TEXT NOT NULL DEFAULT '',
     competitor_weakness TEXT NOT NULL DEFAULT '',
     search_trend_signal TEXT NOT NULL DEFAULT '',
+    aha_angle TEXT NOT NULL DEFAULT '',
+    unfair_advantage TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL
 );
 
@@ -261,15 +263,16 @@ class Database:
         flags_json: str,
         analysis_json: str,
     ) -> int:
-        verdict, dial, rivals, weakness, trend = _brief_columns(analysis_json)
+        verdict, dial, rivals, weakness, trend, aha, moat = _brief_columns(analysis_json)
         try:
             cursor = await self.conn.execute(
                 """
                 INSERT INTO insights (
                     item_id, confidence, opportunity_score, flags_json,
                     analysis_json, telegram_sent, judge_verdict, market_dial,
-                    top_competitors, competitor_weakness, search_trend_signal, created_at
-                ) VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?)
+                    top_competitors, competitor_weakness, search_trend_signal,
+                    aha_angle, unfair_advantage, created_at
+                ) VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     item_id,
@@ -282,6 +285,8 @@ class Database:
                     rivals,
                     weakness,
                     trend,
+                    aha,
+                    moat,
                     utcnow_iso(),
                 ),
             )
@@ -419,6 +424,14 @@ class Database:
             await self.conn.execute(
                 "ALTER TABLE insights ADD COLUMN search_trend_signal TEXT NOT NULL DEFAULT ''"
             )
+        if "aha_angle" not in names:
+            await self.conn.execute(
+                "ALTER TABLE insights ADD COLUMN aha_angle TEXT NOT NULL DEFAULT ''"
+            )
+        if "unfair_advantage" not in names:
+            await self.conn.execute(
+                "ALTER TABLE insights ADD COLUMN unfair_advantage TEXT NOT NULL DEFAULT ''"
+            )
 
     async def notification_count(self, state: int) -> int:
         async with self.conn.execute(
@@ -478,8 +491,8 @@ class Database:
         }
 
 
-def _brief_columns(analysis_json: str) -> tuple[str, float | None, str, str, str]:
-    empty = ("", None, "", "", "")
+def _brief_columns(analysis_json: str) -> tuple[str, float | None, str, str, str, str, str]:
+    empty = ("", None, "", "", "", "", "")
     try:
         payload = json.loads(analysis_json or "{}")
     except json.JSONDecodeError:
@@ -490,14 +503,16 @@ def _brief_columns(analysis_json: str) -> tuple[str, float | None, str, str, str
     rivals = _competitor_text(payload.get("top_competitors"))
     weakness = clip(str(payload.get("competitor_weakness") or "").strip(), 1200)
     trend = clip(str(payload.get("search_trend_signal") or "").strip(), 400)
+    aha = clip(str(payload.get("aha_angle") or "").strip(), 500)
+    moat = clip(str(payload.get("unfair_advantage") or "").strip(), 400)
     raw_dial = payload.get("market_dial")
     if raw_dial is None or raw_dial == "":
-        return verdict, None, rivals, weakness, trend
+        return verdict, None, rivals, weakness, trend, aha, moat
     try:
         dial = float(raw_dial)
     except (TypeError, ValueError):
-        return verdict, None, rivals, weakness, trend
-    return verdict, max(0.50, min(1.00, dial)), rivals, weakness, trend
+        return verdict, None, rivals, weakness, trend, aha, moat
+    return verdict, max(0.50, min(1.00, dial)), rivals, weakness, trend, aha, moat
 
 
 def _competitor_text(raw: object) -> str:
