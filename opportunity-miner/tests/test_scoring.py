@@ -135,6 +135,24 @@ class ScoringTests(unittest.IsolatedAsyncioTestCase):
                 os.environ["GEMINI_MODEL"] = previous
         self.assertEqual(loaded.gemini_model, "gemini-2.0-flash")
 
+    def test_generate_sync_calls_genai_and_drops_json_mime_when_rejected(self) -> None:
+        calls: list[dict] = []
+
+        class Models:
+            def generate_content(self, *, model, contents, config):
+                calls.append({"model": model, "contents": contents, "config": dict(config)})
+                if "response_mime_type" in config:
+                    raise RuntimeError("response mime type is not supported")
+                return type("Response", (), {"text": "{\"is_human\": true}"})()
+
+        classifier = GeminiClassifier(Settings(gemini_api_key="k", gemini_model="gemini-2.0-flash"))
+        classifier._client = type("Client", (), {"models": Models()})()
+        self.assertEqual(classifier._generate_sync("hello"), "{\"is_human\": true}")
+        self.assertEqual(calls[0]["model"], "gemini-2.0-flash")
+        self.assertEqual(calls[0]["contents"], "hello")
+        self.assertEqual(calls[0]["config"]["response_mime_type"], "application/json")
+        self.assertNotIn("response_mime_type", calls[1]["config"])
+
     def test_gold_fixture_clears_the_default_gate(self) -> None:
         self.assertTrue(gold_classification().passes(70))
 

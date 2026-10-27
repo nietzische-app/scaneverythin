@@ -155,7 +155,7 @@ class GeminiClassifier:
     def __init__(self, settings: Settings, generate=None) -> None:
         self.settings = settings
         self._generate_override = generate
-        self._genai = None
+        self._client = None
 
     @property
     def available(self) -> bool:
@@ -209,16 +209,22 @@ class GeminiClassifier:
         )
 
     def _generate_sync(self, prompt: str) -> str:
-        genai = self._sdk()
-        model = genai.GenerativeModel(self.settings.gemini_model)
-        config = {"temperature": 0, "response_mime_type": "application/json"}
+        client = self._sdk()
         try:
-            response = model.generate_content(prompt, generation_config=config)
+            response = client.models.generate_content(
+                model=self.settings.gemini_model,
+                contents=prompt,
+                config={"temperature": 0, "response_mime_type": "application/json"},
+            )
         except Exception as exc:
             message = str(exc).lower()
             if "mime" not in message and "json" not in message and "schema" not in message:
                 raise
-            response = model.generate_content(prompt, generation_config={"temperature": 0})
+            response = client.models.generate_content(
+                model=self.settings.gemini_model,
+                contents=prompt,
+                config={"temperature": 0},
+            )
         text = getattr(response, "text", None) or ""
         if not text.strip():
             raise RuntimeError(
@@ -228,9 +234,8 @@ class GeminiClassifier:
         return text
 
     def _sdk(self):
-        if self._genai is None:
-            import google.generativeai as genai
+        if self._client is None:
+            from google import genai
 
-            genai.configure(api_key=self.settings.gemini_api_key)
-            self._genai = genai
-        return self._genai
+            self._client = genai.Client(api_key=self.settings.gemini_api_key)
+        return self._client
