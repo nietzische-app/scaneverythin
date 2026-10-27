@@ -44,6 +44,8 @@ SCOUT_PROMPT = (
     "TR Pazar Fırsatı (Local Adaptation: a localization opportunity specific to the Turkish market). "
     "Give equal or higher weight to large-scale enterprise platforms, multi-tenant B2B SaaS, and infrastructure ecosystems, alongside ideas that can ship as a 1-day tool. "
     "project_scale: a short Turkish label such as Hızlı MVP, Büyük Çaplı B2B Platformu, or Yüksek Hype B2C. "
+    "If it is a developer tool, say whether it is a classical helper (linter, CLI, code cleanup, CRUD generator) "
+    "or AI-native infrastructure (LLM observability, MCP, agent memory, guardrails, AI evals). "
     "suggested_domains: exactly 2 short catchy domains, each a single hostname such as slug.io, slug.app, or slug.com. "
     "Leave the final gate to the Judge. A draft opportunity_score is allowed, and the Judge may replace it."
 )
@@ -56,16 +58,24 @@ JUDGE_PROMPT = (
     "Is this a saturated post-2023 AI wrapper (standard PDF chat, basic text rephrasers, saturated AI wrappers)? "
     "Does an easily accessible open-source alternative exist? "
     "Will customers actually pay monthly recurring revenue (MRR) for this? "
-    "If it is a DevTool, is it a low-margin micro tool or a high-value B2B/Enterprise security or infrastructure solution? "
+    "If it is a DevTool, restrict the evaluation to AI Infrastructure and AI-Native Enablers. "
     "Strictly identify outdated or saturated post-AI wrapper ideas. "
     "If the idea is already monopolized or trivialized post-2023, set saturated_wrapper true and "
     "rate its opportunity_score strictly below 50 so it gets filtered out. "
     "Do not restrict opportunity_score to minor micro-tools. "
-    "A high-value B2B or Enterprise security or infrastructure product is not a niche low-level utility. "
-    "devtool_class is micro for a low-margin micro DevTool, enterprise for a high-value B2B or Enterprise "
-    "security or infrastructure solution, and none otherwise. "
-    "A micro DevTool must be rejected with opportunity_score strictly below 50. "
-    "An enterprise DevTool passes only with opportunity_score >= 80; otherwise set it strictly below 50. "
+    "devtool_class is pre_ai, ai_infra, or none. "
+    "pre_ai means a classical or pre-AI developer tool: traditional developer tools, code cleanups, "
+    "basic linters, standard CLI helpers, or CRUD generators that a developer can easily write with "
+    "Cursor, ChatGPT, or Claude. Force opportunity_score strictly below 50. "
+    "In judge_verdict, explicitly include the words Pre-AI obsolete tool and REJECT. "
+    "ai_infra means a high-value AI ecosystem tool. Actively seek these and score them from 80 to 95: "
+    "LLM observability and cost tracking (token usage, latency, hallucination evaluation); "
+    "MCP and agent connectors (custom MCP servers, agent tool-calling frameworks, agent memory or RAG infrastructure); "
+    "AI safety and guardrails (prompt injection shields, output validators, automated red-teaming for LLM apps); "
+    "AI-native testing and benchmark tools (automated evaluation harnesses for AI agents and workflows). "
+    "An ai_infra DevTool passes only with opportunity_score from 80 to 95; otherwise set it strictly below 50. "
+    "In judge_verdict, explicitly include the words High-Value AI Ecosystem Infrastructure and PASS. "
+    "A favorite-based penalty for niche low-level utilities does not apply to ai_infra. "
     "Provide an 'opportunity_score' strictly between 0 and 100 based on SaaS / business potential. "
     "Return that score as an integer. "
     "Return JSON with opportunity_score, judge_verdict, saturated_wrapper, open_source_alternative, "
@@ -84,7 +94,9 @@ def favorite_clause(titles: list[str]) -> str:
         "The user prefers ideas similar to these past favorites: "
         f"[{'; '.join(cleaned)}]. Give higher opportunity scores to projects with similar "
         "tech/business profiles (e.g., accessible B2C/B2B web & mobile tools, automation) "
-        "and lower scores to overly niche low-level code/infrastructure utilities."
+        "and lower scores to overly niche low-level code/infrastructure utilities. "
+        "Do not apply that penalty to AI-native infrastructure such as LLM observability, MCP servers, "
+        "agent memory, guardrails, or AI evaluation harnesses."
     )
 
 _BLOCKED_STATUS = {401, 403, 429}
@@ -231,21 +243,56 @@ def merge_committee(scout: dict, judge: dict) -> Opportunity:
     payload["judge_verdict"] = str(judge.get("judge_verdict") or payload.get("judge_verdict") or "").strip()
     opportunity = opportunity_from_payload(payload)
     gated = apply_judge_gates(opportunity.opportunity_score, judge)
+    verdict = _stamp_devtool_verdict(opportunity.judge_verdict, judge, gated)
+    updates: dict = {}
     if gated != opportunity.opportunity_score:
-        return opportunity.model_copy(update={"opportunity_score": gated})
+        updates["opportunity_score"] = gated
+    if verdict != opportunity.judge_verdict:
+        updates["judge_verdict"] = verdict
+    if updates:
+        return opportunity.model_copy(update=updates)
     return opportunity
+
+
+_PRE_AI = {"pre ai", "preai", "classical", "obsolete", "micro", "low margin", "reject"}
+_AI_INFRA = {"ai infra", "ai infrastructure", "ai native", "enterprise", "security", "b2b security"}
+
+
+def _devtool_kind(judge: dict) -> str:
+    kind = str(judge.get("devtool_class") or "").strip().lower().replace("-", " ").replace("_", " ")
+    kind = " ".join(kind.split())
+    if kind in _PRE_AI:
+        return "pre_ai"
+    if kind in _AI_INFRA:
+        return "ai_infra"
+    return ""
 
 
 def apply_judge_gates(score: int, judge: dict) -> int:
     """Enforce the reject rules in code so a soft model score cannot sneak through."""
-    kind = str(judge.get("devtool_class") or "").strip().lower().replace("-", " ").replace("_", " ")
-    micro = kind in {"micro", "low margin", "reject"}
-    enterprise = kind in {"enterprise", "security", "infrastructure", "b2b security"}
-    if _yes(judge.get("saturated_wrapper")) or micro:
+    kind = _devtool_kind(judge)
+    if _yes(judge.get("saturated_wrapper")) or kind == "pre_ai":
         return min(score, 49)
-    if enterprise and score < 80:
-        return min(score, 49)
+    if kind == "ai_infra":
+        if score < 80:
+            return min(score, 49)
+        return min(score, 95)
     return score
+
+
+def _stamp_devtool_verdict(verdict: str, judge: dict, score: int) -> str:
+    kind = _devtool_kind(judge)
+    if kind == "pre_ai":
+        tag = "Pre-AI obsolete tool (REJECT)"
+    elif kind == "ai_infra" and score >= 80:
+        tag = "High-Value AI Ecosystem Infrastructure (PASS)"
+    elif kind == "ai_infra":
+        tag = "High-Value AI Ecosystem Infrastructure (REJECT)"
+    else:
+        return verdict
+    if tag.split(" (", 1)[0] in verdict:
+        return verdict
+    return clip(f"{tag}. {verdict}".strip(), 1200)
 
 
 def _yes(value: object) -> bool:

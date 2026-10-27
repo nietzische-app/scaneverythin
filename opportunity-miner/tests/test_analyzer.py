@@ -79,6 +79,9 @@ def test_default_model_is_gpt_4o_mini_and_parses_the_brief():
     assert "Zamanının Ötesinde / Yeniden Canlandırılabilir" in system
     assert "TR Pazar Fırsatı" in system
     assert "minor micro-tools" in system
+    assert "Pre-AI obsolete tool" in system
+    assert "High-Value AI Ecosystem Infrastructure" in system
+    assert "MCP" in system
     assert "project_scale" in system
     assert Settings(openai_model="gpt-4o").openai_model == "gpt-4o"
     assert Settings(openai_model="").openai_model == "gpt-4o-mini"

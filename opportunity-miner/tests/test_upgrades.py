@@ -102,6 +102,29 @@ class UpgradeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(apply_judge_gates(90, {"saturated_wrapper": True}), 49)
         self.assertEqual(apply_judge_gates(70, {"devtool_class": "enterprise"}), 49)
         self.assertEqual(apply_judge_gates(85, {"devtool_class": "enterprise"}), 85)
+        self.assertEqual(apply_judge_gates(92, {"devtool_class": "ai_infra"}), 92)
+        self.assertEqual(apply_judge_gates(99, {"devtool_class": "ai_infra"}), 95)
+        self.assertEqual(apply_judge_gates(90, {"devtool_class": "pre_ai"}), 49)
+        from analysis.analyzer import merge_committee
+
+        rejected = merge_committee(
+            {"title_tr": "Lint"},
+            {"opportunity_score": 90, "devtool_class": "pre_ai", "judge_verdict": "Cursor ile yazılır."},
+        )
+        self.assertEqual(rejected.opportunity_score, 49)
+        self.assertIn("Pre-AI obsolete tool", rejected.judge_verdict)
+        self.assertIn("REJECT", rejected.judge_verdict)
+        passed = merge_committee(
+            {"title_tr": "Token izleme"},
+            {
+                "opportunity_score": 91,
+                "devtool_class": "ai_infra",
+                "judge_verdict": "Halüsinasyon ve maliyet izler.",
+            },
+        )
+        self.assertEqual(passed.opportunity_score, 91)
+        self.assertIn("High-Value AI Ecosystem Infrastructure", passed.judge_verdict)
+        self.assertIn("PASS", passed.judge_verdict)
         quiet = market_dial(fetched=8, sources=1, engaged=0)
         self.assertLess(quiet, 0.60)
         self.assertGreaterEqual(quiet, 0.50)
