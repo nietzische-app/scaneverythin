@@ -129,3 +129,143 @@ def test_lists_models_when_every_hardcoded_id_is_missing():
     assert result.error is None
     assert result.confidence == 91
     assert result.reasons["is_human"] == "from the live list"
+
+
+def _payload(confidence: int) -> dict:
+    return {
+        "is_human": True,
+        "has_signal": True,
+        "has_mechanism": True,
+        "is_relevant": True,
+        "should_forward": True,
+        "model_confidence": confidence,
+        "reasons": {"is_human": "kept"},
+    }
+
+
+def _not_found(model: str) -> ClientError:
+    return ClientError(
+        404,
+        {"error": {"code": 404, "message": f"{model} is not found", "status": "NOT_FOUND"}},
+    )
+
+
+def test_skips_image_models_and_zero_quota_then_pins_the_winner():
+    seen: list[str] = []
+    listed = {"calls": 0}
+
+    class Listed:
+        def __init__(self, name: str, actions: list[str] | None = None) -> None:
+            self.name = name
+            self.supported_actions = actions or ["generateContent"]
+
+    class Models:
+        def generate_content(self, *, model, contents, config):
+            seen.append(model)
+            if "image" in model:
+                raise AssertionError(model)
+            if model == "gemini-2.5-pro":
+                return type("Response", (), {"text": json.dumps(_payload(88))})()
+            if model == "gemini-2.0-flash-exp":
+                raise ClientError(
+                    429,
+                    {
+                        "error": {
+                            "code": 429,
+                            "message": "limit: 0, model: gemini-2.0-flash-exp",
+                            "status": "RESOURCE_EXHAUSTED",
+                        }
+                    },
+                )
+            raise _not_found(model)
+
+        def list(self):
+            listed["calls"] += 1
+            return [
+                Listed("models/gemini-2.5-flash-lite"),
+                Listed("models/gemini-2.5-flash-image"),
+                Listed("models/gemini-2.5-flash-preview-image"),
+                Listed("models/gemini-2.0-flash-exp"),
+                Listed("models/gemini-2.5-pro"),
+                Listed("models/text-embedding-004", ["embedContent"]),
+            ]
+
+    classifier = GeminiClassifier(Settings(gemini_api_key="k", gemini_model="gemini-2.0-flash"))
+    classifier._client = type("Client", (), {"models": Models()})()
+    first = asyncio.run(classifier.classify(sample_post()))
+    second = asyncio.run(classifier.classify(sample_post()))
+
+    assert first.error is None and first.confidence == 88
+    assert second.error is None and second.confidence == 88
+    assert seen == [
+        "gemini-2.0-flash",
+        "gemini-1.5-flash",
+        "gemini-2.5-flash",
+        "gemini-2.5-flash-lite",
+        "gemini-2.0-flash-exp",
+        "gemini-2.5-pro",
+        "gemini-2.5-pro",
+    ]
+    assert listed["calls"] == 1
+    assert "gemini-2.5-flash-image" not in seen
+
+
+def test_real_rate_limit_does_not_walk_the_fallback_list():
+    seen: list[str] = []
+
+    class Models:
+        def generate_content(self, *, model, contents, config):
+            seen.append(model)
+            raise ClientError(
+                429,
+                {
+                    "error": {
+                        "code": 429,
+                        "message": "Resource exhausted. Please retry in 20s.",
+                        "status": "RESOURCE_EXHAUSTED",
+                    }
+                },
+            )
+
+    classifier = GeminiClassifier(Settings(gemini_api_key="k", gemini_model="gemini-2.0-flash"))
+    classifier._client = type("Client", (), {"models": Models()})()
+    result = asyncio.run(classifier.classify(sample_post()))
+    assert seen == ["gemini-2.0-flash"]
+    assert result.error is not None
+
+
+def test_next_post_continues_past_dead_listed_models():
+    seen: list[str] = []
+
+    class Listed:
+        def __init__(self, name: str) -> None:
+            self.name = name
+            self.supported_actions = ["generateContent"]
+
+    class Models:
+        def generate_content(self, *, model, contents, config):
+            seen.append(model)
+            if model == "gemini-2.5-pro":
+                return type("Response", (), {"text": json.dumps(_payload(77))})()
+            raise _not_found(model)
+
+        def list(self):
+            return [Listed(name) for name in ("gemini-a", "gemini-b", "gemini-c", "gemini-d", "gemini-2.5-pro")]
+
+    classifier = GeminiClassifier(Settings(gemini_api_key="k", gemini_model="gemini-2.0-flash"))
+    classifier._client = type("Client", (), {"models": Models()})()
+    first = asyncio.run(classifier.classify(sample_post()))
+    second = asyncio.run(classifier.classify(sample_post()))
+
+    assert first.error is not None
+    assert second.confidence == 77
+    assert seen[:7] == [
+        "gemini-2.0-flash",
+        "gemini-1.5-flash",
+        "gemini-2.5-flash",
+        "gemini-a",
+        "gemini-b",
+        "gemini-c",
+        "gemini-d",
+    ]
+    assert seen[7:] == ["gemini-2.5-pro"]

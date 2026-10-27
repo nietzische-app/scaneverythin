@@ -169,11 +169,22 @@ def classification_from_payload(payload: dict) -> Classification:
     )
 
 
+_NON_TEXT = ("image", "imagen", "tts", "embed", "live", "audio", "video", "veo")
+
+
+def _text_model(model_id: str) -> bool:
+    name = model_id.lower()
+    return bool(name) and not any(part in name for part in _NON_TEXT)
+
+
 class GeminiClassifier:
     def __init__(self, settings: Settings, generate=None) -> None:
         self.settings = settings
         self._generate_override = generate
         self._client = None
+        self._dead: set[str] = set()
+        self._working: str | None = None
+        self._catalog: list | None = None
 
     @property
     def available(self) -> bool:
@@ -228,41 +239,62 @@ class GeminiClassifier:
 
     def _generate_sync(self, prompt: str) -> str:
         client = self._sdk()
+        if self._working:
+            text = self._accept(client, self._working, prompt)
+            if text:
+                return text
+            self._working = None
         last: Exception | None = None
         tried: list[str] = []
         all_missing = True
         for model in gemini_model_candidates(self.settings.gemini_model):
             model_id = gemini_model_id(model)
-            if model_id in tried:
+            if model_id in tried or model_id in self._dead or not _text_model(model_id):
                 continue
             tried.append(model_id)
-            text, exc = self._one(client, model_id, prompt)
+            text, exc, missing = self._take(client, model_id, prompt)
             if text:
                 return text
             last = exc
-            if _model_missing(exc):
-                continue
-            if isinstance(exc, RuntimeError) and str(exc).startswith("empty response"):
-                all_missing = False
-                continue
-            if exc is not None:
-                raise exc
-            all_missing = False
-        if all_missing and tried:
+            all_missing = all_missing and missing
+        if all_missing:
             logger.warning("hardcoded Gemini models returned 404; listing models")
             for discovered in self._listed_models(client, tried):
-                text, exc = self._one(client, discovered, prompt)
+                text, exc, _missing = self._take(client, discovered, prompt)
                 if text:
                     return text
                 last = exc
-                if _model_missing(exc):
-                    continue
-                if exc is not None:
-                    raise exc
-                break
         if last is not None:
             raise last
         raise RuntimeError("no Gemini model id to call")
+
+    def _accept(self, client, model_id: str, prompt: str) -> str | None:
+        text, exc, _missing = self._take(client, model_id, prompt)
+        if text:
+            return text
+        if exc is not None and not _skip_model(exc):
+            if not _empty(exc):
+                raise exc
+        return None
+
+    def _take(
+        self, client, model_id: str, prompt: str
+    ) -> tuple[str | None, Exception | None, bool]:
+        text, exc = self._one(client, model_id, prompt)
+        if text:
+            self._working = model_id
+            return text, None, False
+        if _skip_model(exc):
+            self._dead.add(model_id)
+            if exc is not None and not _model_missing(exc):
+                logger.warning(
+                    "Gemini model %s has free-tier quota 0; trying the next id",
+                    model_id,
+                )
+            return None, exc, True
+        if exc is not None and not _empty(exc):
+            raise exc
+        return None, exc, False
 
     def _one(self, client, model_id: str, prompt: str) -> tuple[str | None, Exception | None]:
         logger.warning("requesting Gemini model %s on api %s", model_id, _api_version(client))
@@ -280,18 +312,24 @@ class GeminiClassifier:
         return None, RuntimeError(f"empty response from {model_id}")
 
     def _listed_models(self, client, tried: list[str]) -> list[str]:
-        try:
-            listed = list(client.models.list())
-        except Exception as exc:
-            logger.warning("Gemini models.list failed: %s", exc)
-            return []
+        if self._catalog is None:
+            try:
+                self._catalog = list(client.models.list())
+            except Exception as exc:
+                logger.warning("Gemini models.list failed: %s", exc)
+                return []
         usable: list[str] = []
-        for item in listed:
+        for item in self._catalog:
             actions = getattr(item, "supported_actions", None) or []
             if actions and not any(str(action).lower() == "generatecontent" for action in actions):
                 continue
             model_id = gemini_model_id(str(getattr(item, "name", "") or ""))
-            if model_id and model_id not in tried and model_id not in usable:
+            if (
+                _text_model(model_id)
+                and model_id not in tried
+                and model_id not in self._dead
+                and model_id not in usable
+            ):
                 usable.append(model_id)
         flash = [model_id for model_id in usable if "flash" in model_id]
         rest = [model_id for model_id in usable if model_id not in flash]
@@ -335,13 +373,31 @@ def _api_version(client) -> str:
     return str(getattr(options, "api_version", None) or "default")
 
 
-def _model_missing(exc: Exception | None) -> bool:
-    if exc is None:
-        return False
+def _status_code(exc: Exception) -> int | None:
     code = getattr(exc, "code", None)
     if code is None:
         code = getattr(exc, "status_code", None)
-    if code == 404:
+    return code if isinstance(code, int) else None
+
+
+def _model_missing(exc: Exception | None) -> bool:
+    if exc is None:
+        return False
+    if _status_code(exc) == 404:
         return True
     message = str(exc).lower()
     return "not_found" in message or "not found" in message
+
+
+def _skip_model(exc: Exception | None) -> bool:
+    """404, or a model whose free-tier quota is permanently 0."""
+    if _model_missing(exc) or exc is None:
+        return _model_missing(exc)
+    message = str(exc).lower()
+    if "limit: 0" not in message and "limit:0" not in message:
+        return False
+    return _status_code(exc) == 429 or "resource_exhausted" in message
+
+
+def _empty(exc: Exception) -> bool:
+    return isinstance(exc, RuntimeError) and str(exc).startswith("empty response")
