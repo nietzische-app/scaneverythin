@@ -6,11 +6,14 @@ Each scan takes a small rotating slice of the account list so a full day of
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 from datetime import datetime, timezone
 from urllib.parse import quote
 
 import httpx
+
+logger = logging.getLogger(__name__)
 
 from config import Settings
 from database.models import RawPost
@@ -53,8 +56,16 @@ class XFetcher:
         self.clock = clock or (lambda: datetime.now(timezone.utc))
         self.limiter = RateLimiter(min_interval)
         self._down: set[str] = set()
+        self._warned = False
 
     async def fetch(self) -> FetchBatch:
+        try:
+            return await self._fetch()
+        except Exception as exc:  # noqa: BLE001 — X is optional and must not abort the scan
+            self._warn_exhausted(str(exc))
+            return FetchBatch(source=self.source, posts=[], errors=[f"x: {exc}"])
+
+    async def _fetch(self) -> FetchBatch:
         posts: list[RawPost] = []
         errors: list[str] = []
         now = self.clock()
@@ -90,16 +101,18 @@ class XFetcher:
     async def _read(self, path: str) -> str:
         candidates = [base for base in self.settings.nitter_instances if base and base not in self._down]
         if not candidates:
-            raise FetchError("all public RSS instances are marked down")
+            self._warn_exhausted("no live mirrors left")
+            raise FetchError("all Nitter instances failed")
         last: Exception | None = None
         headers = {
             "User-Agent": self.settings.user_agent,
             "Accept": "application/rss+xml, application/xml, text/xml, */*",
         }
-        for base in candidates:
+        for index, base in enumerate(candidates):
+            if index == 0:
+                await self.limiter.wait()
             url = base.rstrip("/") + path
             try:
-                await self.limiter.wait()
                 response = await self.client.get(
                     url,
                     headers=headers,
@@ -108,8 +121,18 @@ class XFetcher:
             except (httpx.TimeoutException, httpx.TransportError) as exc:
                 self._down.add(base)
                 last = exc
+                logger.info("Nitter instance %s failed (%s); trying the next mirror", base, exc)
                 continue
-            if response.status_code in {401, 403, 429, 451} or response.status_code >= 500:
+            if response.status_code in {403, 451}:
+                self._down.add(base)
+                last = FetchError(f"{response.status_code} from {base}")
+                logger.info(
+                    "Nitter instance %s returned %s; trying the next mirror",
+                    base,
+                    response.status_code,
+                )
+                continue
+            if response.status_code in {401, 429} or response.status_code >= 500:
                 self._down.add(base)
                 last = FetchError(f"{response.status_code} from {base}")
                 continue
@@ -123,4 +146,15 @@ class XFetcher:
                 last = FetchError(f"{base} did not return a feed")
                 continue
             return text
-        raise FetchError(str(last) if last else "no feed")
+        detail = str(last) if last else "no feed"
+        self._warn_exhausted(detail)
+        raise FetchError(detail)
+
+    def _warn_exhausted(self, detail: str) -> None:
+        if self._warned:
+            return
+        self._warned = True
+        logger.warning(
+            "All Nitter instances failed (%s). X posts are skipped for this pass.",
+            detail,
+        )

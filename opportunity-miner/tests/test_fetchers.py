@@ -12,7 +12,7 @@ from config import Settings
 from ingestion.feeds import parse_feed
 from ingestion.hn_fetcher import HackerNewsFetcher, dedupe_ids, fetch_hn_stories, normalize_story
 from ingestion.producthunt_fetcher import ProductHuntFetcher
-from ingestion.reddit_fetcher import RedditFetcher, parse_reddit_listing
+from ingestion.reddit_fetcher import REDDIT_USER_AGENT, RedditFetcher, parse_reddit_listing
 from ingestion.x_fetcher import XFetcher
 from datetime import datetime, timezone
 
@@ -195,7 +195,10 @@ class FetcherTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(any(post.external_id == "hn_3" for post in batch.posts))
 
     async def test_reddit_product_hunt_and_x_reads(self) -> None:
+        seen_agents: list[str] = []
+
         def reddit_handler(request: httpx.Request) -> httpx.Response:
+            seen_agents.append(request.headers.get("user-agent", ""))
             if request.url.path.endswith(".rss"):
                 return httpx.Response(200, text=REDDIT_RSS)
             return httpx.Response(403, text="blocked")
@@ -203,11 +206,26 @@ class FetcherTests(unittest.IsolatedAsyncioTestCase):
         settings = Settings(reddit_subs=["SaaS"], reddit_limit=10)
         async with httpx.AsyncClient(transport=httpx.MockTransport(reddit_handler)) as client:
             batch = await RedditFetcher(settings, client, min_interval=0).fetch()
+        self.assertTrue(seen_agents)
+        self.assertTrue(all(agent == REDDIT_USER_AGENT for agent in seen_agents))
         self.assertEqual(len(batch.posts), 1)
         self.assertEqual(batch.posts[0].external_id, "t3_abc")
         self.assertEqual(batch.posts[0].author, "/u/mina")
         self.assertIn("Spreadsheets are failing me", batch.posts[0].body)
         self.assertFalse(batch.errors)
+
+    async def test_reddit_429_falls_back_to_one_combined_feed(self) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            self.assertEqual(request.headers.get("user-agent"), REDDIT_USER_AGENT)
+            if "+" in request.url.path:
+                return httpx.Response(200, text=REDDIT_RSS)
+            return httpx.Response(429, text="slow down")
+
+        settings = Settings(reddit_subs=["SaaS", "gamedev"], reddit_limit=5)
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            batch = await RedditFetcher(settings, client, min_interval=0).fetch()
+        self.assertEqual([post.external_id for post in batch.posts], ["t3_abc"])
+        self.assertEqual(batch.errors, [])
 
         def ph_handler(_request: httpx.Request) -> httpx.Response:
             return httpx.Response(200, text=FEED)
@@ -252,6 +270,68 @@ class FetcherTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(batch.posts[0].author, "levelsio")
         self.assertIn("https://dead.example", fetcher._down)
         self.assertEqual(batch.errors, [])
+
+    async def test_x_403_and_451_try_the_next_mirror(self) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            if request.url.host == "blocked.example":
+                return httpx.Response(403, text="<html>blocked</html>")
+            if request.url.host == "legal.example":
+                return httpx.Response(451, text="<html>unavailable</html>")
+            return httpx.Response(200, text=TWEET)
+
+        settings = Settings(
+            nitter_instances=[
+                "https://blocked.example",
+                "https://legal.example",
+                "https://live.example",
+            ],
+            x_max_accounts_per_scan=1,
+            x_posts_per_account=1,
+            x_hashtags_per_scan=0,
+        )
+        moment = datetime(2026, 10, 27, 3, 0, tzinfo=timezone.utc)
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            fetcher = XFetcher(
+                settings,
+                client,
+                accounts=["levelsio"],
+                hashtags=[],
+                clock=lambda: moment,
+                min_interval=0,
+            )
+            batch = await fetcher.fetch()
+        self.assertEqual([post.external_id for post in batch.posts], ["99"])
+        self.assertEqual(batch.errors, [])
+        self.assertEqual(
+            fetcher._down,
+            {"https://blocked.example", "https://legal.example"},
+        )
+
+    async def test_x_all_mirrors_down_logs_and_returns(self) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            code = 451 if request.url.host.startswith("second") else 403
+            return httpx.Response(code, text="<html>no</html>")
+
+        settings = Settings(
+            nitter_instances=["https://first.example", "https://second.example"],
+            x_max_accounts_per_scan=2,
+            x_hashtags_per_scan=0,
+        )
+        moment = datetime(2026, 10, 27, 4, 0, tzinfo=timezone.utc)
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            fetcher = XFetcher(
+                settings,
+                client,
+                accounts=["alpha", "beta"],
+                hashtags=[],
+                clock=lambda: moment,
+                min_interval=0,
+            )
+            with self.assertLogs("ingestion.x_fetcher", level="WARNING") as captured:
+                batch = await fetcher.fetch()
+        self.assertEqual(batch.posts, [])
+        self.assertTrue(any("All Nitter instances failed" in line for line in captured.output))
+        self.assertTrue(any("skipped for this pass" in line for line in captured.output))
 
 
 if __name__ == "__main__":
