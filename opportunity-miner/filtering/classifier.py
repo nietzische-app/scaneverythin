@@ -45,7 +45,7 @@ ATOMIC_QUESTIONS: tuple[tuple[str, str], ...] = (
 
 _REQUIRED = ("is_human", "has_signal", "is_relevant", "should_forward")
 _FLAG_KEYS = tuple(key for key, _question in ATOMIC_QUESTIONS)
-_FALLBACK_MODELS = ("gemini-1.5-flash", "gemini-2.5-flash")
+_FALLBACK_MODELS = ("gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash")
 
 
 def gemini_model_id(name: str | None) -> str:
@@ -240,10 +240,7 @@ class GeminiClassifier:
                 raise
             if text.strip():
                 return text
-            last = RuntimeError(
-                f"empty response from {model}. "
-                "If Gemini 1.5 Flash is retired, set GEMINI_MODEL=gemini-2.5-flash."
-            )
+            last = RuntimeError(f"empty response from {model}")
         if last is not None:
             raise last
         raise RuntimeError("no Gemini model id to call")
