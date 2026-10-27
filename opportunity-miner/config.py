@@ -27,6 +27,15 @@ _DEFAULT_NITTER = [
     "https://nitter.space",
     "https://xcancel.com",
 ]
+_DEFAULT_GITHUB_TOPICS = [
+    "mcp-server",
+    "ai-agent",
+    "llm-infra",
+    "workflow-automation",
+    "guardrails",
+]
+_DEFAULT_TREND_KEYWORDS = ["B2B software", "AI tools", "workflow automation"]
+_DEFAULT_X_QUERIES = ["#buildinpublic", "#saas", "mcp server", "ai agent SaaS"]
 
 
 def _env(name: str, default: str = "") -> str:
@@ -100,6 +109,19 @@ class Settings(BaseModel):
     x_posts_per_account: int = 2
     x_hashtags_per_scan: int = 2
     nitter_instances: list[str] = Field(default_factory=lambda: list(_DEFAULT_NITTER))
+    github_topics: list[str] = Field(default_factory=lambda: list(_DEFAULT_GITHUB_TOPICS))
+    github_min_stars: int = 30
+    github_min_stars_per_day: float = 3.0
+    github_created_within_days: int = 180
+    github_token: str = ""
+    acquire_sitemap_url: str = "https://app.acquire.com/sitemap.xml"
+    indiehackers_feed_url: str = "https://www.indiehackers.com/feed.rss"
+    flippa_url: str = "https://flippa.com/buy/saas"
+    saas_listing_limit: int = 5
+    trends_keywords: list[str] = Field(default_factory=lambda: list(_DEFAULT_TREND_KEYWORDS))
+    trends_min_growth: int = 200
+    x_bearer_token: str = ""
+    x_direct_queries: list[str] = Field(default_factory=lambda: list(_DEFAULT_X_QUERIES))
 
     log_level: str = "INFO"
     host: str = "0.0.0.0"
@@ -207,6 +229,21 @@ def load_settings() -> Settings:
         x_posts_per_account=_int("X_POSTS_PER_ACCOUNT", 2),
         x_hashtags_per_scan=_int("X_HASHTAGS_PER_SCAN", 2),
         nitter_instances=_csv("NITTER_INSTANCES", _DEFAULT_NITTER),
+        github_topics=_csv("GITHUB_TOPICS", _DEFAULT_GITHUB_TOPICS),
+        github_min_stars=_int("GITHUB_MIN_STARS", 30),
+        github_min_stars_per_day=_float("GITHUB_MIN_STARS_PER_DAY", 3.0),
+        github_created_within_days=_int("GITHUB_CREATED_WITHIN_DAYS", 180),
+        github_token=_env("GITHUB_TOKEN"),
+        acquire_sitemap_url=_env("ACQUIRE_SITEMAP_URL", "https://app.acquire.com/sitemap.xml"),
+        indiehackers_feed_url=_env(
+            "INDIEHACKERS_FEED_URL", "https://www.indiehackers.com/feed.rss"
+        ),
+        flippa_url=_env("FLIPPA_URL", "https://flippa.com/buy/saas"),
+        saas_listing_limit=_int("SAAS_LISTING_LIMIT", 5),
+        trends_keywords=_csv("TRENDS_KEYWORDS", _DEFAULT_TREND_KEYWORDS),
+        trends_min_growth=_int("TRENDS_MIN_GROWTH", 200),
+        x_bearer_token=_env("X_BEARER_TOKEN"),
+        x_direct_queries=_csv("X_DIRECT_QUERIES", _DEFAULT_X_QUERIES),
         log_level=_env("LOG_LEVEL", "INFO"),
         host=_env("HOST", "0.0.0.0"),
         port=_int("PORT", 8000),

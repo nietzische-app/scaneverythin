@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 from typing import Protocol
 
 import httpx
@@ -10,6 +11,26 @@ from pydantic import BaseModel, Field
 
 from config import Settings
 from database.models import RawPost
+
+
+_STATUS_ID = re.compile(r"/status/(\d+)")
+
+
+def canonical_key(post: RawPost) -> str:
+    """Identity used to drop the same target before a second Scout pass.
+
+    An X status id collapses Nitter and direct copies. Any other http(s) URL
+    collapses trailing-slash and case variants. Everything else keeps the hash.
+    """
+    match = _STATUS_ID.search(post.url or "")
+    if match is None and post.source in {"x", "x-direct"}:
+        match = _STATUS_ID.search(f"/status/{post.external_id}")
+    if match:
+        return f"status:{match.group(1)}"
+    url = (post.url or "").strip().rstrip("/").lower()
+    if url:
+        return f"url:{url}"
+    return f"hash:{post.content_hash}"
 
 
 class FetchError(RuntimeError):
