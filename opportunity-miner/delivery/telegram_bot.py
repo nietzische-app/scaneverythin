@@ -119,13 +119,15 @@ def mvp_prompt(view: InsightView) -> str:
         f"Why now: {_pick(analysis, 'why_now')}\n"
         f"Audience and revenue: {_pick(analysis, 'business_model')}\n"
         f"Differentiator: {_pick(analysis, 'our_differentiator')}\n"
+        f"Non-obvious angle: {_pick(analysis, 'aha_angle')}\n"
+        f"Unfair advantage: {_pick(analysis, 'unfair_advantage')}\n"
         f"Scope:\n{features}\n\n"
         "Stack (do not substitute):\n"
         "- Next.js App Router + Tailwind CSS for the UI\n"
         "- Supabase if auth or multi-user data is required, otherwise SQLite\n"
         "- FastAPI for any job, webhook, or integration the UI should not own\n\n"
         "Ship today:\n"
-        "1. One screen that demonstrates the core loop.\n"
+        "1. One screen that demonstrates the non-obvious angle, not a generic version of the idea.\n"
         "2. Persistence for the one record type that makes the loop real.\n"
         "3. A README with how to run it locally.\n\n"
         "Do not add billing, admin, or extra products."
@@ -147,13 +149,13 @@ def grok_prompt(view: InsightView) -> str:
         f"TR market: {_pick(analysis, 'tr_market_analysis')}\n"
         f"Differentiator: {_pick(analysis, 'our_differentiator')}\n"
         f"Audience and revenue: {_pick(analysis, 'business_model')}\n"
+        f"Aha angle: {_pick(analysis, 'aha_angle')}\n"
+        f"Unfair advantage: {_pick(analysis, 'unfair_advantage')}\n"
         f"Judge verdict: {_pick(analysis, 'judge_verdict')}\n"
         f"Score: {int(view.opportunity_score)}/100\n\n"
-        "Answer in three short sections:\n"
-        "1. Positioning: the one sentence this product should own, and who it is not for.\n"
-        "2. Viral loop: the action that brings the next user, and the first message they send.\n"
-        "3. Competitor vulnerabilities: two specific weaknesses a buyer already feels, "
-        "and how this product hits them."
+        "Answer only these two questions:\n"
+        "1. How to exploit this non-obvious angle for viral distribution.\n"
+        "2. How to build an uncopyable MVP in 24 hours using Cursor and AI agents."
     )
 
 
@@ -190,6 +192,21 @@ def _competitor_line(raw: object) -> str:
     return " | ".join(names[:3]) or "—"
 
 
+def _aha_lines(analysis: dict, *, markdown: bool) -> list[str]:
+    angle = _field(analysis, "aha_angle")
+    moat = _field(analysis, "unfair_advantage")
+    if markdown:
+        angle, moat = escape_md(angle), escape_md(moat)
+        return [
+            f"🧠 *Aha\\! / Zekice Yaklaşım:* {angle}",
+            f"🛡️ *Haksız Avantaj / Moat:* {moat}",
+        ]
+    return [
+        f"🧠 Aha! / Zekice Yaklaşım: {angle}",
+        f"🛡️ Haksız Avantaj / Moat: {moat}",
+    ]
+
+
 def _type_scale(analysis: dict, *, markdown: bool) -> str:
     kind = str(analysis.get("opportunity_type") or "").strip() or "—"
     scale = str(analysis.get("project_scale") or "").strip() or "—"
@@ -224,6 +241,8 @@ def format_alert(view: InsightView) -> str:
         "🎯 *Hedef Kitle & Gelir Modeli:*",
         escape_md(_field(analysis, "business_model")),
         "",
+        *_aha_lines(analysis, markdown=True),
+        "",
         "⚖️ *Yargıç / Risk Notu:*",
         escape_md(_field(analysis, "judge_verdict")),
         "━━━━━━━━━━━━━━━━━━━━",
@@ -257,6 +276,8 @@ def plain_alert(view: InsightView) -> str:
             "",
             "🎯 Hedef Kitle & Gelir Modeli:",
             _field(analysis, "business_model"),
+            "",
+            *_aha_lines(analysis, markdown=False),
             "",
             "⚖️ Yargıç / Risk Notu:",
             _field(analysis, "judge_verdict"),

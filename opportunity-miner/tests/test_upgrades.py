@@ -113,6 +113,12 @@ class UpgradeTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("• ⚠️ Rakiplerin Zayıf Karnı: Kurulum günler sürüyor.", card)
         self.assertIn("• 📈 Arama Hacmi & Hype: Stabil / Niş arama hacmi", card)
         self.assertIn(r"RakipA \(Commercial SaaS\)", format_alert(view))
+        view.analysis["aha_angle"] = "PR açılınca video çıkar."
+        view.analysis["unfair_advantage"] = "GitHub olayı dağıtır."
+        card = plain_alert(view)
+        self.assertIn("🧠 Aha! / Zekice Yaklaşım: PR açılınca video çıkar.", card)
+        self.assertIn("🛡️ Haksız Avantaj / Moat: GitHub olayı dağıtır.", card)
+        self.assertIn(r"Aha\! / Zekice Yaklaşım", format_alert(view))
 
     async def test_competitor_columns_are_stored(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -129,6 +135,9 @@ class UpgradeTests(unittest.IsolatedAsyncioTestCase):
                     ],
                     "competitor_weakness": "Kurulum günler sürüyor.",
                     "search_trend_signal": "Stabil / Niş arama hacmi",
+                    "aha_angle": "PR açılınca video çıkar.",
+                    "unfair_advantage": "GitHub olayı dağıtır.",
+                    "aha_pillars": ["cross_domain", "why_now"],
                 }
             )
             await db.add_insight(
@@ -139,21 +148,33 @@ class UpgradeTests(unittest.IsolatedAsyncioTestCase):
                 analysis_json=opportunity.model_dump_json(),
             )
             async with db.conn.execute(
-                "SELECT top_competitors, competitor_weakness, search_trend_signal FROM insights"
+                """
+                SELECT top_competitors, competitor_weakness, search_trend_signal,
+                       aha_angle, unfair_advantage
+                FROM insights
+                """
             ) as cursor:
                 row = await cursor.fetchone()
             self.assertEqual(row["top_competitors"], "RakipA (Commercial SaaS) | RakipB (Open Source)")
             self.assertEqual(row["competitor_weakness"], "Kurulum günler sürüyor.")
             self.assertEqual(row["search_trend_signal"], "Stabil / Niş arama hacmi")
+            self.assertEqual(row["aha_angle"], "PR açılınca video çıkar.")
+            self.assertEqual(row["unfair_advantage"], "GitHub olayı dağıtır.")
             await db.close()
 
     def test_judge_gates_and_quiet_day_dial(self) -> None:
         self.assertEqual(apply_judge_gates(90, {"devtool_class": "micro"}), 49)
         self.assertEqual(apply_judge_gates(90, {"saturated_wrapper": True}), 49)
         self.assertEqual(apply_judge_gates(70, {"devtool_class": "enterprise"}), 49)
-        self.assertEqual(apply_judge_gates(85, {"devtool_class": "enterprise"}), 85)
-        self.assertEqual(apply_judge_gates(92, {"devtool_class": "ai_infra"}), 92)
-        self.assertEqual(apply_judge_gates(99, {"devtool_class": "ai_infra"}), 95)
+        self.assertEqual(apply_judge_gates(85, {"devtool_class": "enterprise"}), 49)
+        pillars = {"aha_pillars": ["cross_domain", "why_now"]}
+        self.assertEqual(apply_judge_gates(85, {"devtool_class": "enterprise", **pillars}), 85)
+        self.assertEqual(apply_judge_gates(92, {"devtool_class": "ai_infra"}), 49)
+        self.assertEqual(apply_judge_gates(92, {"devtool_class": "ai_infra", **pillars}), 92)
+        self.assertEqual(apply_judge_gates(99, {"devtool_class": "ai_infra", **pillars}), 95)
+        self.assertEqual(apply_judge_gates(90, {"aha_pillars": ["viral"]}), 79)
+        self.assertEqual(apply_judge_gates(90, pillars), 90)
+        self.assertEqual(apply_judge_gates(90, {"obvious": True, **pillars}), 49)
         self.assertEqual(apply_judge_gates(90, {"devtool_class": "pre_ai"}), 49)
         from analysis.analyzer import merge_committee
 
@@ -170,11 +191,17 @@ class UpgradeTests(unittest.IsolatedAsyncioTestCase):
                 "opportunity_score": 91,
                 "devtool_class": "ai_infra",
                 "judge_verdict": "Halüsinasyon ve maliyet izler.",
+                "aha_pillars": ["cross_domain", "Why Now"],
+                "aha_angle": "PR açılınca video kendiliğinden çıkar.",
+                "unfair_advantage": "GitHub olayı dağıtımı başlatır.",
             },
         )
         self.assertEqual(passed.opportunity_score, 91)
         self.assertIn("High-Value AI Ecosystem Infrastructure", passed.judge_verdict)
         self.assertIn("PASS", passed.judge_verdict)
+        self.assertEqual(passed.aha_angle, "PR açılınca video kendiliğinden çıkar.")
+        self.assertEqual(passed.unfair_advantage, "GitHub olayı dağıtımı başlatır.")
+        self.assertEqual(passed.aha_pillars, ["cross_domain", "Why Now"])
         kept = merge_committee(
             {
                 "title_tr": "Radar",
@@ -228,8 +255,9 @@ class UpgradeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(Settings().producthunt_feed_url, "https://www.producthunt.com/feed")
         prompt = grok_prompt(_view(title="Fatura hatırlatıcı"))
         self.assertIn("Fatura hatırlatıcı", prompt)
-        self.assertIn("Viral loop", prompt)
-        self.assertIn("Competitor vulnerabilities", prompt)
+        self.assertIn("How to exploit this non-obvious angle for viral distribution.", prompt)
+        self.assertIn("How to build an uncopyable MVP in 24 hours using Cursor and AI agents.", prompt)
+        self.assertIn("non-obvious angle", mvp_prompt(_view(title="Fatura hatırlatıcı")))
         buttons = mvp_keyboard(7)["inline_keyboard"][0]
         self.assertEqual(buttons[1]["text"], "🤖 Grok ile İncele")
         self.assertEqual(buttons[1]["callback_data"], "grok:7")

@@ -88,4 +88,6 @@ class ReactionTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn("top_competitors", names)
             self.assertIn("competitor_weakness", names)
             self.assertIn("search_trend_signal", names)
+            self.assertIn("aha_angle", names)
+            self.assertIn("unfair_advantage", names)
             await db.close()

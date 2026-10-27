@@ -8,7 +8,7 @@ from typing import Protocol
 
 import httpx
 
-from analysis.analyzer import OpenAIAnalyzer, OpenAIUnavailable
+from analysis.analyzer import OpenAIAnalyzer, OpenAIUnavailable, clears_aha_bar
 from config import Settings
 from database.db import Database
 from database.models import Classification, InsightView, ItemRecord, Opportunity, RawPost, ScanReport
@@ -288,7 +288,8 @@ class ScanService:
         required = notify_threshold(self.settings.notify_min_opportunity_score, dial)
         logger.info("market dial %.2f; notify threshold %s", dial, required)
         for view in pending:
-            passed = view.opportunity_score >= required
+            aha_ok = clears_aha_bar(view.opportunity_score, view.analysis)
+            passed = view.opportunity_score >= required and aha_ok
             logger.info(
                 "Item %s score: %s, required: %s - %s",
                 view.item_id,
@@ -296,6 +297,11 @@ class ScanService:
                 required,
                 "PASSED" if passed else "SKIPPED",
             )
+            if view.opportunity_score >= required and not aha_ok:
+                logger.info(
+                    "Item %s Aha filter blocked Telegram: fewer than 2 pillars or an obvious idea",
+                    view.item_id,
+                )
             if not passed:
                 await self.db.set_telegram_state(view.insight_id, 2)
                 continue
