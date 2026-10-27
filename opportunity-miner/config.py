@@ -59,7 +59,7 @@ class Settings(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     gemini_api_key: str = ""
-    gemini_model: str = "gemini-2.5-flash"
+    gemini_model: str = "gemini-2.0-flash"
     deepseek_api_key: str = ""
     deepseek_base_url: str = "https://api.deepseek.com"
     deepseek_model: str = "deepseek-chat"
@@ -131,7 +131,7 @@ class Settings(BaseModel):
         raw = (value or "").strip()
         while raw.startswith("models/"):
             raw = raw.removeprefix("models/")
-        return raw or "gemini-2.5-flash"
+        return raw or "gemini-2.0-flash"
 
     @field_validator("classifier_mode")
     @classmethod
@@ -164,7 +164,7 @@ def load_settings() -> Settings:
     load_dotenv(override=False)
     return Settings(
         gemini_api_key=_env("GEMINI_API_KEY"),
-        gemini_model=_env("GEMINI_MODEL", "gemini-2.5-flash"),
+        gemini_model=_env("GEMINI_MODEL", "gemini-2.0-flash"),
         deepseek_api_key=_env("DEEPSEEK_API_KEY"),
         deepseek_base_url=_env("DEEPSEEK_BASE_URL", "https://api.deepseek.com"),
         deepseek_model=_env("DEEPSEEK_MODEL", "deepseek-chat"),

@@ -45,7 +45,7 @@ ATOMIC_QUESTIONS: tuple[tuple[str, str], ...] = (
 
 _REQUIRED = ("is_human", "has_signal", "is_relevant", "should_forward")
 _FLAG_KEYS = tuple(key for key, _question in ATOMIC_QUESTIONS)
-FLASH_MODELS = ("gemini-2.5-flash", "gemini-2.0-flash-exp", "gemini-1.5-flash")
+FLASH_MODELS = ("gemini-2.0-flash", "gemini-1.5-flash-8b", "gemini-1.5-flash")
 
 
 def gemini_model_id(name: str | None) -> str:
@@ -275,11 +275,7 @@ class GeminiClassifier:
         if self._client is None:
             from google import genai
 
-            # v1beta is the current Gemini Developer API. v1alpha and Vertex v1beta1 are not used.
-            self._client = genai.Client(
-                api_key=self.settings.gemini_api_key,
-                http_options={"api_version": "v1beta"},
-            )
+            self._client = genai.Client(api_key=self.settings.gemini_api_key)
         return self._client
 
 

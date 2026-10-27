@@ -13,18 +13,31 @@ from filtering.classifier import FLASH_MODELS, GeminiClassifier
 from tests.support import sample_post
 
 
-def test_client_stays_on_v1beta_without_a_model_prefix():
-    from google.genai._transformers import t_model
+def test_client_keeps_the_sdk_default_endpoint():
+    from google import genai
 
-    classifier = GeminiClassifier(Settings(gemini_api_key="k"))
-    client = classifier._sdk()
-    assert client._api_client._http_options.api_version == "v1beta"
-    wired = t_model(client._api_client, "gemini-2.5-flash")
-    assert wired == "models/gemini-2.5-flash"
+    plain = genai.Client(api_key="k")
+    client = GeminiClassifier(Settings(gemini_api_key="k"))._sdk()
+    assert client._api_client._http_options.api_version == plain._api_client._http_options.api_version
+    assert client._api_client._http_options.base_url == plain._api_client._http_options.base_url
+
+
+def test_generate_content_is_called_with_gemini_2_0_flash():
+    seen: list[str] = []
+
+    class Models:
+        def generate_content(self, *, model, contents, config):
+            seen.append(model)
+            return type("Response", (), {"text": "{\"is_human\": true}"})()
+
+    classifier = GeminiClassifier(Settings(gemini_api_key="k", gemini_model="gemini-2.0-flash"))
+    classifier._client = type("Client", (), {"models": Models()})()
+    assert classifier._generate_sync("ping") == "{\"is_human\": true}"
+    assert seen == ["gemini-2.0-flash"]
 
 
 def test_flash_fallback_order_is_bare_ids():
-    assert list(FLASH_MODELS) == ["gemini-2.5-flash", "gemini-2.0-flash-exp", "gemini-1.5-flash"]
+    assert list(FLASH_MODELS) == ["gemini-2.0-flash", "gemini-1.5-flash-8b", "gemini-1.5-flash"]
 
 
 def test_not_found_falls_through_and_parses_the_client_payload(caplog):
@@ -44,28 +57,28 @@ def test_not_found_falls_through_and_parses_the_client_payload(caplog):
             seen.append(model)
             assert not str(model).startswith("models/")
             assert model in FLASH_MODELS
-            if model == "gemini-2.5-flash":
+            if model == "gemini-2.0-flash":
                 raise ClientError(
                     404,
                     {
                         "error": {
                             "code": 404,
-                            "message": "gemini-2.5-flash is not found",
+                            "message": "gemini-2.0-flash is not found",
                             "status": "NOT_FOUND",
                         }
                     },
                 )
-            assert model == "gemini-2.0-flash-exp"
+            assert model == "gemini-1.5-flash-8b"
             return type("Response", (), {"text": json.dumps(payload)})()
 
-    classifier = GeminiClassifier(Settings(gemini_api_key="k", gemini_model="gemini-2.5-flash"))
+    classifier = GeminiClassifier(Settings(gemini_api_key="k", gemini_model="gemini-2.0-flash"))
     classifier._client = type("Client", (), {"models": Models()})()
     with caplog.at_level(logging.WARNING):
         result = asyncio.run(classifier.classify(sample_post()))
 
-    assert seen == ["gemini-2.5-flash", "gemini-2.0-flash-exp"]
-    assert "requesting Gemini model gemini-2.5-flash" in caplog.text
-    assert "requesting Gemini model gemini-2.0-flash-exp" in caplog.text
+    assert seen == ["gemini-2.0-flash", "gemini-1.5-flash-8b"]
+    assert "requesting Gemini model gemini-2.0-flash" in caplog.text
+    assert "requesting Gemini model gemini-1.5-flash-8b" in caplog.text
     assert "requesting Gemini model models/" not in caplog.text
     assert result.error is None
     assert result.is_human is True
