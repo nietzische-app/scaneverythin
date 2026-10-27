@@ -64,9 +64,17 @@ def create_app(
         scheduler = None
         if settings.scheduler_enabled:
             scheduler = asyncio.create_task(_scheduler(coordinator, settings))
+        from delivery.telegram_bot import poll_reactions
+
+        reaction_stop = asyncio.Event()
+        reactions = asyncio.create_task(poll_reactions(settings, db, reaction_stop))
         try:
             yield
         finally:
+            reaction_stop.set()
+            reactions.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await reactions
             if scheduler is not None:
                 scheduler.cancel()
                 with contextlib.suppress(asyncio.CancelledError):
@@ -159,6 +167,14 @@ def create_app(
             }
         )
         return HTMLResponse(page)
+
+    @app.post("/telegram/webhook")
+    async def telegram_webhook(request: Request) -> dict:
+        from delivery.telegram_bot import apply_reaction
+
+        update = await request.json()
+        liked = await apply_reaction(request.app.state.db, request.app.state.settings, update)
+        return {"ok": True, "liked": liked}
 
     @app.post("/run-scan")
     async def run_scan(

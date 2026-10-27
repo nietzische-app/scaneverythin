@@ -70,6 +70,9 @@ def test_default_model_is_gpt_4o_mini_and_parses_the_brief():
     assert "strictly below 50" in system
     assert "tr_market_analysis" in system
     assert "our_differentiator" in system
+    assert "Tam olarak kime, ne acı çektiriyor?" in system
+    assert "solution_mechanism" in system
+    assert "why_now" in system
     assert Settings(openai_model="gpt-4o").openai_model == "gpt-4o"
     assert Settings(openai_model="").openai_model == "gpt-4o-mini"
 

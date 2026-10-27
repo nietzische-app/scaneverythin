@@ -20,6 +20,9 @@ Kurallar:
 {
   "title_tr": "kısa fırsat adı",
   "summary_tr": "iki veya üç cümle",
+  "net_problem": "tam olarak kime ne acı çektiriyor",
+  "solution_mechanism": "yazılım problemi nasıl çözüyor",
+  "why_now": "neden şimdi",
   "core_problem_or_mechanic": "çekirdek problem veya mekanik",
   "opportunity_type": "micro_saas | b2b_tool | indie_game | content_tool | other",
   "turkish_market": {

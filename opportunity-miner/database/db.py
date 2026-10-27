@@ -48,6 +48,8 @@ CREATE TABLE IF NOT EXISTS insights (
     flags_json TEXT NOT NULL,
     analysis_json TEXT NOT NULL,
     telegram_sent INTEGER NOT NULL DEFAULT 0,
+    user_liked INTEGER NOT NULL DEFAULT 0,
+    telegram_message_id INTEGER,
     created_at TEXT NOT NULL
 );
 
@@ -95,6 +97,7 @@ class Database:
         await self._conn.execute("PRAGMA journal_mode=WAL")
         await self._conn.execute("PRAGMA foreign_keys=ON")
         await self._conn.executescript(SCHEMA)
+        await self._ensure_insight_columns()
         await self._conn.commit()
 
     async def close(self) -> None:
@@ -310,6 +313,54 @@ class Database:
             (state, insight_id),
         )
         await self.conn.commit()
+
+    async def set_telegram_message(self, insight_id: int, message_id: int) -> None:
+        await self.conn.execute(
+            "UPDATE insights SET telegram_message_id = ? WHERE id = ?",
+            (message_id, insight_id),
+        )
+        await self.conn.commit()
+
+    async def mark_liked(self, message_id: int) -> bool:
+        cursor = await self.conn.execute(
+            "UPDATE insights SET user_liked = 1 WHERE telegram_message_id = ?",
+            (message_id,),
+        )
+        await self.conn.commit()
+        return cursor.rowcount > 0
+
+    async def liked_titles(self, limit: int = 8) -> list[str]:
+        sql = """
+            SELECT i.analysis_json AS analysis_json, s.title AS title
+            FROM insights i
+            JOIN scanned_items s ON s.id = i.item_id
+            WHERE i.user_liked = 1
+            ORDER BY i.created_at DESC
+            LIMIT ?
+        """
+        async with self.conn.execute(sql, (limit,)) as cursor:
+            rows = await cursor.fetchall()
+        titles: list[str] = []
+        for row in rows:
+            title = ""
+            try:
+                payload = json.loads(row["analysis_json"] or "{}")
+                title = str(payload.get("title_tr") or "").strip()
+            except json.JSONDecodeError:
+                title = ""
+            titles.append(title or str(row["title"] or "").strip())
+        return [title for title in titles if title]
+
+    async def _ensure_insight_columns(self) -> None:
+        async with self.conn.execute("PRAGMA table_info(insights)") as cursor:
+            rows = await cursor.fetchall()
+        names = {row["name"] for row in rows}
+        if "user_liked" not in names:
+            await self.conn.execute(
+                "ALTER TABLE insights ADD COLUMN user_liked INTEGER NOT NULL DEFAULT 0"
+            )
+        if "telegram_message_id" not in names:
+            await self.conn.execute("ALTER TABLE insights ADD COLUMN telegram_message_id INTEGER")
 
     async def notification_count(self, state: int) -> int:
         async with self.conn.execute(

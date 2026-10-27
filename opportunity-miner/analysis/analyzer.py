@@ -34,9 +34,25 @@ SYSTEM_PROMPT = (
     "tr_market_analysis: Türkiye pazarındaki yerel rekabet ve boşluklar. "
     "our_differentiator: Bizim ne farkımız olabilir, pazarda nasıl öne geçeriz (Moat / Valör). "
     "business_model: hedef kitle ve gelir modeli. "
+    "The summary must be explicit, actionable, and easy to understand. Avoid abstract jargon. "
+    "net_problem: Tam olarak kime, ne acı çektiriyor? "
+    "solution_mechanism: Bu yazılım problemi tam olarak nasıl çözüyor? "
+    "why_now: Pazardaki güncel fırsat veya trend nedir? "
     "Provide an 'opportunity_score' strictly between 0 and 100 based on SaaS / business potential. "
     "Return that score as an integer."
 )
+
+
+def favorite_clause(titles: list[str]) -> str:
+    cleaned = [title.strip() for title in titles if title and title.strip()]
+    if not cleaned:
+        return ""
+    return (
+        "The user prefers ideas similar to these past favorites: "
+        f"[{'; '.join(cleaned)}]. Give higher opportunity scores to projects with similar "
+        "tech/business profiles (e.g., accessible B2C/B2B web & mobile tools, automation) "
+        "and lower scores to overly niche low-level code/infrastructure utilities."
+    )
 
 _BLOCKED_STATUS = {401, 403, 429}
 
@@ -67,10 +83,11 @@ def _unavailable(exc: Exception) -> OpenAIUnavailable:
 
 
 class OpenAIAnalyzer:
-    def __init__(self, settings: Settings, prompt_path: Path | None = None, complete=None) -> None:
+    def __init__(self, settings: Settings, prompt_path: Path | None = None, complete=None, db=None) -> None:
         self.settings = settings
         self.prompt_path = prompt_path or PROMPT_PATH
         self._complete_override = complete
+        self._db = db
         self._client: OpenAI | None = None
 
     @property
@@ -82,8 +99,11 @@ class OpenAIAnalyzer:
             raise RuntimeError("openai_not_configured")
         template = self.prompt_path.read_text(encoding="utf-8")
         user_prompt = render_prompt(template, post)
+        clause = ""
+        if self._db is not None and self._complete_override is None:
+            clause = favorite_clause(await self._db.liked_titles())
         content = await asyncio.wait_for(
-            self._complete(user_prompt),
+            self._complete(user_prompt, clause),
             timeout=self.settings.analyzer_timeout_seconds,
         )
         return opportunity_from_payload(parse_json_object(content))
@@ -94,14 +114,14 @@ class OpenAIAnalyzer:
         if client is not None:
             client.close()
 
-    async def _complete(self, user_prompt: str) -> str:
+    async def _complete(self, user_prompt: str, system_extra: str = "") -> str:
         if self._complete_override is not None:
             result = self._complete_override(user_prompt)
             if asyncio.iscoroutine(result):
                 return await result
             return result
         try:
-            return await self._request(user_prompt, json_mode=True)
+            return await self._request(user_prompt, json_mode=True, system_extra=system_extra)
         except OpenAIUnavailable:
             raise
         except Exception as exc:
@@ -111,11 +131,11 @@ class OpenAIAnalyzer:
             if "response_format" not in message and "json" not in message:
                 raise
             logger.info("retrying OpenAI without JSON mode: %s", exc)
-            return await self._request(user_prompt, json_mode=False)
+            return await self._request(user_prompt, json_mode=False, system_extra=system_extra)
 
-    async def _request(self, user_prompt: str, *, json_mode: bool) -> str:
+    async def _request(self, user_prompt: str, *, json_mode: bool, system_extra: str = "") -> str:
         try:
-            return await asyncio.to_thread(self._request_sync, user_prompt, json_mode)
+            return await asyncio.to_thread(self._request_sync, user_prompt, json_mode, system_extra)
         except OpenAIUnavailable:
             raise
         except Exception as exc:
@@ -123,12 +143,13 @@ class OpenAIAnalyzer:
                 raise _unavailable(exc) from exc
             raise
 
-    def _request_sync(self, user_prompt: str, json_mode: bool) -> str:
+    def _request_sync(self, user_prompt: str, json_mode: bool, system_extra: str = "") -> str:
+        system = SYSTEM_PROMPT if not system_extra else f"{SYSTEM_PROMPT}\n{system_extra}"
         kwargs = {
             "model": self.settings.openai_model,
             "temperature": 0.3,
             "messages": [
-                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "system", "content": system},
                 {"role": "user", "content": user_prompt},
             ],
         }

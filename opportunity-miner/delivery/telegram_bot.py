@@ -42,6 +42,26 @@ def _summary(analysis: dict) -> str:
     return summary or problem or "—"
 
 
+def _summary_blocks(analysis: dict, *, markdown: bool) -> list[str]:
+    parts = (
+        ("🤕", "Net Problem", analysis.get("net_problem")),
+        ("🛠️", "Çözüm Mekanizması", analysis.get("solution_mechanism")),
+        ("⏳", "Neden Şimdi?", analysis.get("why_now")),
+    )
+    filled = [str(value or "").strip() for _emoji, _label, value in parts]
+    if not any(filled):
+        text = _summary(analysis)
+        return [escape_md(text) if markdown else text]
+    lines: list[str] = []
+    for emoji, label, value in parts:
+        body = str(value or "").strip() or "—"
+        if markdown:
+            lines.append(f"{emoji} *{label}:* {escape_md(body)}")
+        else:
+            lines.append(f"{emoji} {label}: {body}")
+    return lines
+
+
 def format_alert(view: InsightView) -> str:
     analysis = view.analysis or {}
     title = analysis.get("title_tr") or view.title
@@ -52,7 +72,7 @@ def format_alert(view: InsightView) -> str:
         f"🔗 {md_link('Kaynak Bağlantısı', view.url)}",
         "",
         "💡 *Özet & Problem:*",
-        escape_md(_summary(analysis)),
+        *_summary_blocks(analysis, markdown=True),
         "",
         "🇹🇷 *TR Rekabet Durumu:*",
         escape_md(_field(analysis, "tr_market_analysis")),
@@ -78,7 +98,7 @@ def plain_alert(view: InsightView) -> str:
             f"🔗 {view.url}",
             "",
             "💡 Özet & Problem:",
-            _summary(analysis),
+            *_summary_blocks(analysis, markdown=False),
             "",
             "🇹🇷 TR Rekabet Durumu:",
             _field(analysis, "tr_market_analysis"),
@@ -107,7 +127,7 @@ class TelegramNotifier:
     def available(self) -> bool:
         return self.settings.telegram_configured
 
-    async def send(self, view: InsightView) -> bool:
+    async def send(self, view: InsightView) -> int | bool:
         if not self.available:
             return False
         token = self.settings.telegram_bot_token.strip()
@@ -120,14 +140,14 @@ class TelegramNotifier:
         try:
             sent = await self._post(client, url, format_alert(view), "MarkdownV2")
             if sent:
-                return True
+                return sent
             logger.info("telegram markdown rejected for insight %s; sending plain text", view.insight_id)
             return await self._post(client, url, plain_alert(view), None)
         finally:
             if close_after:
                 await client.aclose()
 
-    async def _post(self, client: httpx.AsyncClient, url: str, text: str, parse_mode: str | None) -> bool:
+    async def _post(self, client: httpx.AsyncClient, url: str, text: str, parse_mode: str | None) -> int:
         payload: dict[str, object] = {
             "chat_id": self.settings.telegram_chat_id,
             "text": text[:4096],
@@ -139,8 +159,88 @@ class TelegramNotifier:
             response = await client.post(url, json=payload)
         except httpx.HTTPError as exc:
             logger.warning("telegram request failed: %s", exc)
-            return False
+            return 0
         if response.status_code == 200:
-            return True
+            result = response.json().get("result") or {}
+            try:
+                return int(result.get("message_id") or 0)
+            except (TypeError, ValueError):
+                return 0
         logger.warning("telegram status %s: %s", response.status_code, response.text[:300])
+        return 0
+
+
+_LIKE_EMOJI = {"❤", "❤️", "👍", "🔥"}
+
+
+def _is_like(item: object) -> bool:
+    if not isinstance(item, dict) or item.get("type") != "emoji":
         return False
+    emoji = str(item.get("emoji") or "").replace("\ufe0f", "")
+    return emoji in {value.replace("\ufe0f", "") for value in _LIKE_EMOJI}
+
+
+def liked_message_id(update: dict, chat_id: str) -> int | None:
+    """Return the message id when this chat adds ❤, 👍, or 🔥."""
+    reaction = update.get("message_reaction")
+    if not isinstance(reaction, dict):
+        return None
+    chat = reaction.get("chat") or {}
+    if str(chat.get("id")) != str(chat_id).strip():
+        return None
+    new_reaction = reaction.get("new_reaction") or []
+    if not any(_is_like(item) for item in new_reaction):
+        return None
+    try:
+        return int(reaction["message_id"])
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
+async def apply_reaction(db, settings: Settings, update: dict) -> bool:
+    message_id = liked_message_id(update, settings.telegram_chat_id)
+    if message_id is None:
+        return False
+    liked = await db.mark_liked(message_id)
+    if liked:
+        logger.info("telegram reaction marked message %s as a favorite", message_id)
+    return liked
+
+
+async def poll_reactions(settings: Settings, db, stop) -> None:
+    """Long-poll message_reaction updates until stop is set."""
+    if not settings.telegram_configured:
+        return
+    import asyncio
+    import json
+
+    url = f"https://api.telegram.org/bot{settings.telegram_bot_token.strip()}/getUpdates"
+    offset: int | None = None
+    logger.info("listening for telegram reactions")
+    async with httpx.AsyncClient(timeout=40) as client:
+        while not stop.is_set():
+            params: dict[str, object] = {
+                "timeout": 25,
+                "allowed_updates": json.dumps(["message_reaction"]),
+            }
+            if offset is not None:
+                params["offset"] = offset
+            try:
+                response = await client.get(url, params=params)
+            except httpx.HTTPError as exc:
+                logger.warning("telegram reaction poll failed: %s", exc)
+                await asyncio.sleep(5)
+                continue
+            if response.status_code == 409:
+                logger.error("telegram getUpdates conflict; reaction polling stopped")
+                return
+            if response.status_code != 200:
+                logger.warning("telegram reaction poll status %s", response.status_code)
+                await asyncio.sleep(15)
+                continue
+            for update in response.json().get("result") or []:
+                try:
+                    offset = int(update["update_id"]) + 1
+                except (KeyError, TypeError, ValueError):
+                    continue
+                await apply_reaction(db, settings, update)

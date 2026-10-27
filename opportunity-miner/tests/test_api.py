@@ -105,6 +105,16 @@ class ApiTests(unittest.TestCase):
         self.assertIn("FIRSAT RADARI", card)
         self.assertIn("TR Rekabet Durumu", card)
         self.assertNotIn("v1.2!", card)
+        analysis = brief(title="v1.2!").model_dump()
+        analysis["net_problem"] = "Ajanslar tahsilatı kaçırıyor"
+        analysis["solution_mechanism"] = "Tek hatırlatma gönderir"
+        analysis["why_now"] = "E-fatura zorunlu"
+        view.analysis = analysis
+        detailed = format_alert(view)
+        self.assertIn("Net Problem", detailed)
+        self.assertIn("Çözüm Mekanizması", detailed)
+        self.assertIn("Neden Şimdi?", detailed)
+        self.assertIn("Ajanslar tahsilatı kaçırıyor", detailed)
 
 
 if __name__ == "__main__":

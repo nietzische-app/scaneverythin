@@ -63,7 +63,7 @@ class ScanService:
         self.db = db
         self.fetchers = fetchers
         self.classifier = classifier or GeminiClassifier(settings)
-        self.analyzer = analyzer or OpenAIAnalyzer(settings)
+        self.analyzer = analyzer or OpenAIAnalyzer(settings, db=db)
         self.notifier = notifier
         if self.notifier is None:
             from delivery.telegram_bot import TelegramNotifier
@@ -289,6 +289,8 @@ class ScanService:
                 sent = False
             if sent:
                 await self.db.set_telegram_state(view.insight_id, 1)
+                if type(sent) is int:
+                    await self.db.set_telegram_message(view.insight_id, sent)
                 await self._inc(report, "notified")
 
     async def _fail(self, row: ItemRecord, report: ScanReport, message: str, retry_status: str) -> None:

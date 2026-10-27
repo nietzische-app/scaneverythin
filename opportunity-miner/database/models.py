@@ -89,6 +89,9 @@ class Opportunity(BaseModel):
     tr_market_analysis: str = ""
     our_differentiator: str = ""
     business_model: str = ""
+    net_problem: str = ""
+    solution_mechanism: str = ""
+    why_now: str = ""
     opportunity_score: int = 0
 
 
@@ -209,6 +212,9 @@ def opportunity_from_payload(payload: dict[str, Any]) -> Opportunity:
         tr_market_analysis=clip(str(payload.get("tr_market_analysis") or "").strip(), 1200),
         our_differentiator=clip(str(payload.get("our_differentiator") or "").strip(), 900),
         business_model=clip(str(payload.get("business_model") or "").strip(), 600),
+        net_problem=clip(str(payload.get("net_problem") or "").strip(), 600),
+        solution_mechanism=clip(str(payload.get("solution_mechanism") or "").strip(), 600),
+        why_now=clip(str(payload.get("why_now") or "").strip(), 600),
         opportunity_score=score,
     )
 
