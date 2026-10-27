@@ -226,7 +226,7 @@ def test_skips_image_models_and_zero_quota_then_pins_the_winner(monkeypatch):
     assert "gemini-2.5-flash-image" not in seen
 
 
-def test_real_rate_limit_does_not_walk_the_fallback_list():
+def test_real_rate_limit_does_not_walk_the_fallback_list(caplog):
     seen: list[str] = []
 
     class Models:
@@ -245,9 +245,70 @@ def test_real_rate_limit_does_not_walk_the_fallback_list():
 
     classifier = GeminiClassifier(Settings(gemini_api_key="k", gemini_model="gemini-2.0-flash"))
     classifier._client = type("Client", (), {"models": Models()})()
-    result = asyncio.run(classifier.classify(sample_post()))
+    with caplog.at_level(logging.WARNING):
+        result = asyncio.run(classifier.classify(sample_post()))
     assert seen == ["gemini-2.0-flash"]
-    assert result.error is not None
+    assert result.error == "gemini_quota"
+    assert "429" in caplog.text
+    assert "gpt-4o-mini" in caplog.text
+
+
+def test_quota_429_classifies_the_batch_with_gpt_4o_mini(monkeypatch, caplog):
+    monkeypatch.setattr("filtering.classifier.time.sleep", lambda _seconds: None)
+    gemini_seen: list[str] = []
+    openai_seen: list[dict] = []
+
+    class Models:
+        def generate_content(self, *, model, contents, config):
+            gemini_seen.append(model)
+            raise ClientError(
+                429,
+                {
+                    "error": {
+                        "code": 429,
+                        "message": "Resource exhausted. Please retry in 20s.",
+                        "status": "RESOURCE_EXHAUSTED",
+                    }
+                },
+            )
+
+    class FakeOpenAI:
+        def __init__(self, *, api_key: str) -> None:
+            assert api_key == "sk-test"
+
+        @property
+        def chat(self):
+            return self
+
+        @property
+        def completions(self):
+            return self
+
+        def create(self, **kwargs):
+            openai_seen.append(kwargs)
+            message = type("Message", (), {"content": json.dumps(_payload(84))})()
+            choice = type("Choice", (), {"message": message})()
+            return type("Response", (), {"choices": [choice]})()
+
+        def close(self) -> None:
+            return None
+
+    monkeypatch.setattr("filtering.classifier.OpenAI", FakeOpenAI)
+    classifier = GeminiClassifier(
+        Settings(gemini_api_key="k", openai_api_key="sk-test", gemini_model="gemini-2.0-flash")
+    )
+    classifier._client = type("Client", (), {"models": Models()})()
+    with caplog.at_level(logging.WARNING):
+        first = asyncio.run(classifier.classify(sample_post()))
+        second = asyncio.run(classifier.classify(sample_post()))
+
+    assert first.error is None and first.confidence == 84
+    assert second.error is None and second.confidence == 84
+    assert gemini_seen == ["gemini-2.0-flash"]
+    assert [call["model"] for call in openai_seen] == ["gpt-4o-mini", "gpt-4o-mini"]
+    assert "falling back to OpenAI gpt-4o-mini" in caplog.text
+    classified = sum(1 for result in (first, second) if result.error is None)
+    assert classified == 2
 
 
 def test_next_post_continues_past_dead_listed_models(monkeypatch):

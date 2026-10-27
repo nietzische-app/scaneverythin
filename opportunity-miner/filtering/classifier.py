@@ -16,6 +16,8 @@ import logging
 import threading
 import time
 
+from openai import OpenAI
+
 from config import Settings
 from database.models import Classification, RawPost
 from textutil import as_bool, clip, parse_json_object
@@ -189,6 +191,8 @@ class GeminiClassifier:
         self._catalog: list | None = None
         self._pace_lock = threading.Lock()
         self._paced = False
+        self._gemini_blocked = False
+        self._openai: OpenAI | None = None
 
     @property
     def available(self) -> bool:
@@ -197,13 +201,51 @@ class GeminiClassifier:
     async def classify(self, post: RawPost) -> Classification:
         if not self.available:
             return Classification(error="gemini_not_configured")
+        if self._gemini_blocked:
+            return await self._classify_with_openai(post)
         try:
             if self.settings.classifier_mode == "parallel":
                 return await self._classify_parallel(post)
             return await self._classify_batched(post)
         except Exception as exc:  # noqa: BLE001 — one bad response must not kill the scan
+            if _quota_exhausted(exc):
+                self._gemini_blocked = True
+                logger.warning(
+                    "Gemini quota exhausted (429 RESOURCE_EXHAUSTED); "
+                    "falling back to OpenAI gpt-4o-mini"
+                )
+                return await self._classify_with_openai(post)
             logger.warning("gemini classification failed: %s", exc)
             return Classification(error=clip(str(exc), 300))
+
+    async def _classify_with_openai(self, post: RawPost) -> Classification:
+        """One Stage-1 call on gpt-4o-mini. A failure stays on this post."""
+        if not self.settings.openai_configured:
+            logger.warning("OpenAI stage-1 fallback skipped: OPENAI_API_KEY is missing")
+            return Classification(error="gemini_quota")
+        try:
+            raw = await asyncio.wait_for(
+                asyncio.to_thread(self._openai_sync, build_batched_prompt(post)),
+                timeout=self.settings.llm_timeout_seconds,
+            )
+            return classification_from_payload(parse_json_object(raw))
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("OpenAI stage-1 fallback failed: %s", exc)
+            return Classification(error=clip(str(exc), 300))
+
+    def _openai_sync(self, prompt: str) -> str:
+        if self._openai is None:
+            self._openai = OpenAI(api_key=self.settings.openai_api_key)
+        response = self._openai.chat.completions.create(
+            model="gpt-4o-mini",
+            temperature=0,
+            response_format={"type": "json_object"},
+            messages=[{"role": "user", "content": prompt}],
+        )
+        content = response.choices[0].message.content or ""
+        if not content.strip():
+            raise RuntimeError("empty OpenAI response")
+        return content
 
     async def _classify_batched(self, post: RawPost) -> Classification:
         raw = await self._generate(build_batched_prompt(post))
@@ -399,6 +441,14 @@ def _model_missing(exc: Exception | None) -> bool:
         return True
     message = str(exc).lower()
     return "not_found" in message or "not found" in message
+
+
+def _quota_exhausted(exc: Exception | None) -> bool:
+    """A real 429. A model whose free-tier limit is 0 is handled earlier."""
+    if exc is None:
+        return False
+    message = str(exc).lower()
+    return _status_code(exc) == 429 or "resource_exhausted" in message
 
 
 def _skip_model(exc: Exception | None) -> bool:
