@@ -99,8 +99,9 @@ def test_lists_models_when_every_hardcoded_id_is_missing():
     seen: list[str] = []
 
     class Listed:
-        def __init__(self, name: str) -> None:
+        def __init__(self, name: str, actions: list[str] | None = None) -> None:
             self.name = name
+            self.supported_actions = actions
 
     class Models:
         def generate_content(self, *, model, contents, config):
@@ -114,7 +115,11 @@ def test_lists_models_when_every_hardcoded_id_is_missing():
             )
 
         def list(self):
-            return [Listed("models/gemini-2.0-flash"), Listed("models/gemini-2.5-pro")]
+            return [
+                Listed("models/text-embedding-004", ["embedContent"]),
+                Listed("models/gemini-2.0-flash", ["generateContent"]),
+                Listed("models/gemini-2.5-pro", ["generateContent"]),
+            ]
 
     classifier = GeminiClassifier(Settings(gemini_api_key="k", gemini_model="gemini-2.0-flash"))
     classifier._client = type("Client", (), {"models": Models()})()

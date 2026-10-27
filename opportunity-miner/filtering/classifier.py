@@ -249,20 +249,23 @@ class GeminiClassifier:
                 raise exc
             all_missing = False
         if all_missing and tried:
-            discovered = self._first_listed_model(client, tried)
-            if discovered:
+            logger.warning("hardcoded Gemini models returned 404; listing models")
+            for discovered in self._listed_models(client, tried):
                 text, exc = self._one(client, discovered, prompt)
                 if text:
                     return text
+                last = exc
+                if _model_missing(exc):
+                    continue
                 if exc is not None:
                     raise exc
-                last = RuntimeError(f"empty response from {discovered}")
+                break
         if last is not None:
             raise last
         raise RuntimeError("no Gemini model id to call")
 
     def _one(self, client, model_id: str, prompt: str) -> tuple[str | None, Exception | None]:
-        logger.warning("requesting Gemini model %s", model_id)
+        logger.warning("requesting Gemini model %s on api %s", model_id, _api_version(client))
         try:
             text = self._complete(client, model_id, prompt)
         except Exception as exc:
@@ -276,17 +279,23 @@ class GeminiClassifier:
             return text, None
         return None, RuntimeError(f"empty response from {model_id}")
 
-    def _first_listed_model(self, client, tried: list[str]) -> str | None:
+    def _listed_models(self, client, tried: list[str]) -> list[str]:
         try:
-            listed = client.models.list()
+            listed = list(client.models.list())
         except Exception as exc:
             logger.warning("Gemini models.list failed: %s", exc)
-            return None
+            return []
+        usable: list[str] = []
         for item in listed:
+            actions = getattr(item, "supported_actions", None) or []
+            if actions and not any(str(action).lower() == "generatecontent" for action in actions):
+                continue
             model_id = gemini_model_id(str(getattr(item, "name", "") or ""))
-            if model_id and model_id not in tried:
-                return model_id
-        return None
+            if model_id and model_id not in tried and model_id not in usable:
+                usable.append(model_id)
+        flash = [model_id for model_id in usable if "flash" in model_id]
+        rest = [model_id for model_id in usable if model_id not in flash]
+        return (flash + rest)[:4]
 
     def _complete(self, client, model: str, prompt: str) -> str:
         model_id = gemini_model_id(model)
@@ -320,7 +329,15 @@ class GeminiClassifier:
         return self._client
 
 
-def _model_missing(exc: Exception) -> bool:
+def _api_version(client) -> str:
+    api_client = getattr(client, "_api_client", None)
+    options = getattr(api_client, "_http_options", None)
+    return str(getattr(options, "api_version", None) or "default")
+
+
+def _model_missing(exc: Exception | None) -> bool:
+    if exc is None:
+        return False
     code = getattr(exc, "code", None)
     if code is None:
         code = getattr(exc, "status_code", None)
