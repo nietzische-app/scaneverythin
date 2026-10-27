@@ -83,6 +83,10 @@ def test_default_model_is_gpt_4o_mini_and_parses_the_brief():
     assert "High-Value AI Ecosystem Infrastructure" in system
     assert "MCP" in system
     assert "project_scale" in system
+    assert "top_competitors" in system
+    assert "competitor_weakness" in system
+    assert "search_trend_signal" in system
+    assert "Sinyal belirsiz" in system
     assert Settings(openai_model="gpt-4o").openai_model == "gpt-4o"
     assert Settings(openai_model="").openai_model == "gpt-4o-mini"
 

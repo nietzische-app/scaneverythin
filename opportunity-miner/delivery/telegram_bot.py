@@ -165,6 +165,31 @@ def _pick(analysis: dict, *keys: str) -> str:
     return "—"
 
 
+def _competitor_block(analysis: dict, *, markdown: bool) -> list[str]:
+    rivals = _competitor_line(analysis.get("top_competitors"))
+    weakness = _field(analysis, "competitor_weakness")
+    trend = _field(analysis, "search_trend_signal")
+    if markdown:
+        rivals, weakness, trend = escape_md(rivals), escape_md(weakness), escape_md(trend)
+        title = "🎯 *Pazar & Rakip Analizi:*"
+    else:
+        title = "🎯 Pazar & Rakip Analizi:"
+    return [
+        title,
+        f"• ⚔️ Rakipler: {rivals}",
+        f"• ⚠️ Rakiplerin Zayıf Karnı: {weakness}",
+        f"• 📈 Arama Hacmi & Hype: {trend}",
+    ]
+
+
+def _competitor_line(raw: object) -> str:
+    if isinstance(raw, list):
+        names = [str(item).strip() for item in raw if str(item).strip()]
+    else:
+        names = [part.strip() for part in str(raw or "").split("|") if part.strip()]
+    return " | ".join(names[:3]) or "—"
+
+
 def _type_scale(analysis: dict, *, markdown: bool) -> str:
     kind = str(analysis.get("opportunity_type") or "").strip() or "—"
     scale = str(analysis.get("project_scale") or "").strip() or "—"
@@ -190,6 +215,8 @@ def format_alert(view: InsightView) -> str:
         "",
         "🇹🇷 *TR Rekabet Durumu:*",
         escape_md(_field(analysis, "tr_market_analysis")),
+        "",
+        *_competitor_block(analysis, markdown=True),
         "",
         "⚡ *Bizim Farkımız Ne Olabilir?*",
         escape_md(_field(analysis, "our_differentiator")),
@@ -222,6 +249,8 @@ def plain_alert(view: InsightView) -> str:
             "",
             "🇹🇷 TR Rekabet Durumu:",
             _field(analysis, "tr_market_analysis"),
+            "",
+            *_competitor_block(analysis, markdown=False),
             "",
             "⚡ Bizim Farkımız Ne Olabilir?",
             _field(analysis, "our_differentiator"),

@@ -33,6 +33,13 @@ SCOUT_PROMPT = (
     "tr_market_analysis: Türkiye pazarındaki yerel rekabet ve boşluklar. "
     "our_differentiator: Bizim ne farkımız olabilir, pazarda nasıl öne geçeriz (Moat / Valör). "
     "business_model: hedef kitle ve gelir modeli. "
+    "top_competitors: 2 or 3 main global or local competitors. "
+    "Each item names the competitor and an estimated model or presence, "
+    "for example CompetitorA (Commercial SaaS) or CompetitorB (Open Source). "
+    "competitor_weakness: the primary user complaint or the gap in those existing solutions. "
+    "search_trend_signal: a short qualitative search-volume and hype trajectory in Turkish, "
+    "for example Son 90 günde %120+ arama hacmi artışı or Stabil / Niş arama hacmi. "
+    "Do not invent a percentage the source does not support. If the trajectory is unknown, write Sinyal belirsiz. "
     "The summary must be explicit, actionable, and easy to understand. Avoid abstract jargon. "
     "net_problem: Tam olarak kime, ne acı çektiriyor? "
     "solution_mechanism: Bu yazılım problemi tam olarak nasıl çözüyor? "
@@ -76,10 +83,13 @@ JUDGE_PROMPT = (
     "An ai_infra DevTool passes only with opportunity_score from 80 to 95; otherwise set it strictly below 50. "
     "In judge_verdict, explicitly include the words High-Value AI Ecosystem Infrastructure and PASS. "
     "A favorite-based penalty for niche low-level utilities does not apply to ai_infra. "
+    "The Scout brief may include top_competitors, competitor_weakness, and search_trend_signal. "
+    "Use them when you judge saturation, an open-source alternative, and whether customers will pay. "
+    "If the Scout left any of those three empty, fill them. Do not invent a search percentage. "
     "Provide an 'opportunity_score' strictly between 0 and 100 based on SaaS / business potential. "
     "Return that score as an integer. "
     "Return JSON with opportunity_score, judge_verdict, saturated_wrapper, open_source_alternative, "
-    "mrr_likely, and devtool_class."
+    "mrr_likely, devtool_class, top_competitors, competitor_weakness, and search_trend_signal."
 )
 
 # Scout owns the brief the rest of the app already reads. The Judge owns the score.
@@ -241,6 +251,9 @@ def merge_committee(scout: dict, judge: dict) -> Opportunity:
     if judge.get("opportunity_score") is not None:
         payload["opportunity_score"] = judge.get("opportunity_score")
     payload["judge_verdict"] = str(judge.get("judge_verdict") or payload.get("judge_verdict") or "").strip()
+    for key in ("top_competitors", "competitor_weakness", "search_trend_signal"):
+        if _blank(payload.get(key)) and not _blank(judge.get(key)):
+            payload[key] = judge.get(key)
     opportunity = opportunity_from_payload(payload)
     gated = apply_judge_gates(opportunity.opportunity_score, judge)
     verdict = _stamp_devtool_verdict(opportunity.judge_verdict, judge, gated)
@@ -293,6 +306,12 @@ def _stamp_devtool_verdict(verdict: str, judge: dict, score: int) -> str:
     if tag.split(" (", 1)[0] in verdict:
         return verdict
     return clip(f"{tag}. {verdict}".strip(), 1200)
+
+
+def _blank(value: object) -> bool:
+    if isinstance(value, list):
+        return not any(str(item).strip() for item in value)
+    return not str(value or "").strip()
 
 
 def _yes(value: object) -> bool:
