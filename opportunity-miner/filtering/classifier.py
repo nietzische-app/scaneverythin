@@ -45,7 +45,7 @@ ATOMIC_QUESTIONS: tuple[tuple[str, str], ...] = (
 
 _REQUIRED = ("is_human", "has_signal", "is_relevant", "should_forward")
 _FLAG_KEYS = tuple(key for key, _question in ATOMIC_QUESTIONS)
-FLASH_MODELS = ("gemini-2.0-flash", "gemini-1.5-flash-8b", "gemini-1.5-flash")
+FLASH_MODELS = ("gemini-2.0-flash", "gemini-1.5-flash", "gemini-2.5-flash")
 
 
 def gemini_model_id(name: str | None) -> str:
@@ -229,26 +229,64 @@ class GeminiClassifier:
     def _generate_sync(self, prompt: str) -> str:
         client = self._sdk()
         last: Exception | None = None
+        tried: list[str] = []
+        all_missing = True
         for model in gemini_model_candidates(self.settings.gemini_model):
             model_id = gemini_model_id(model)
-            logger.warning("requesting Gemini model %s", model_id)
-            try:
-                text = self._complete(client, model_id, prompt)
-            except Exception as exc:
-                last = exc
-                if _model_missing(exc):
-                    logger.warning(
-                        "Gemini model %s returned 404 NOT_FOUND; trying the next id",
-                        model_id,
-                    )
-                    continue
-                raise
-            if text.strip():
+            if model_id in tried:
+                continue
+            tried.append(model_id)
+            text, exc = self._one(client, model_id, prompt)
+            if text:
                 return text
-            last = RuntimeError(f"empty response from {model}")
+            last = exc
+            if _model_missing(exc):
+                continue
+            if isinstance(exc, RuntimeError) and str(exc).startswith("empty response"):
+                all_missing = False
+                continue
+            if exc is not None:
+                raise exc
+            all_missing = False
+        if all_missing and tried:
+            discovered = self._first_listed_model(client, tried)
+            if discovered:
+                text, exc = self._one(client, discovered, prompt)
+                if text:
+                    return text
+                if exc is not None:
+                    raise exc
+                last = RuntimeError(f"empty response from {discovered}")
         if last is not None:
             raise last
         raise RuntimeError("no Gemini model id to call")
+
+    def _one(self, client, model_id: str, prompt: str) -> tuple[str | None, Exception | None]:
+        logger.warning("requesting Gemini model %s", model_id)
+        try:
+            text = self._complete(client, model_id, prompt)
+        except Exception as exc:
+            if _model_missing(exc):
+                logger.warning(
+                    "Gemini model %s returned 404 NOT_FOUND; trying the next id",
+                    model_id,
+                )
+            return None, exc
+        if text.strip():
+            return text, None
+        return None, RuntimeError(f"empty response from {model_id}")
+
+    def _first_listed_model(self, client, tried: list[str]) -> str | None:
+        try:
+            listed = client.models.list()
+        except Exception as exc:
+            logger.warning("Gemini models.list failed: %s", exc)
+            return None
+        for item in listed:
+            model_id = gemini_model_id(str(getattr(item, "name", "") or ""))
+            if model_id and model_id not in tried:
+                return model_id
+        return None
 
     def _complete(self, client, model: str, prompt: str) -> str:
         model_id = gemini_model_id(model)
@@ -275,7 +313,10 @@ class GeminiClassifier:
         if self._client is None:
             from google import genai
 
-            self._client = genai.Client(api_key=self.settings.gemini_api_key)
+            self._client = genai.Client(
+                api_key=self.settings.gemini_api_key,
+                http_options={"api_version": "v1"},
+            )
         return self._client
 
 
