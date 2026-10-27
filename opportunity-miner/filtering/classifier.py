@@ -45,21 +45,21 @@ ATOMIC_QUESTIONS: tuple[tuple[str, str], ...] = (
 
 _REQUIRED = ("is_human", "has_signal", "is_relevant", "should_forward")
 _FLAG_KEYS = tuple(key for key, _question in ATOMIC_QUESTIONS)
-_FALLBACK_MODELS = ("gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash")
+FLASH_MODELS = ("gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash")
 
 
 def gemini_model_id(name: str | None) -> str:
-    """Bare id for google.genai. The client adds `models/` itself."""
+    """Bare id. google.genai adds `models/` once; a second prefix 404s."""
     raw = (name or "").strip()
     while raw.startswith("models/"):
         raw = raw.removeprefix("models/")
-    return raw or _FALLBACK_MODELS[0]
+    return raw or FLASH_MODELS[0]
 
 
 def gemini_model_candidates(name: str | None) -> list[str]:
     chosen = gemini_model_id(name)
     ordered = [chosen]
-    for fallback in _FALLBACK_MODELS:
+    for fallback in FLASH_MODELS:
         if fallback not in ordered:
             ordered.append(fallback)
     return ordered
@@ -246,9 +246,10 @@ class GeminiClassifier:
         raise RuntimeError("no Gemini model id to call")
 
     def _complete(self, client, model: str, prompt: str) -> str:
+        model_id = gemini_model_id(model)
         try:
             response = client.models.generate_content(
-                model=model,
+                model=model_id,
                 contents=prompt,
                 config={"temperature": 0, "response_mime_type": "application/json"},
             )
@@ -259,7 +260,7 @@ class GeminiClassifier:
             if "mime" not in message and "json" not in message and "schema" not in message:
                 raise
             response = client.models.generate_content(
-                model=model,
+                model=model_id,
                 contents=prompt,
                 config={"temperature": 0},
             )
@@ -269,7 +270,11 @@ class GeminiClassifier:
         if self._client is None:
             from google import genai
 
-            self._client = genai.Client(api_key=self.settings.gemini_api_key)
+            # v1beta is the current Gemini Developer API. v1alpha and Vertex v1beta1 are not used.
+            self._client = genai.Client(
+                api_key=self.settings.gemini_api_key,
+                http_options={"api_version": "v1beta"},
+            )
         return self._client
 
 
