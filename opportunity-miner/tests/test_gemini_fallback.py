@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 
 from google.genai.errors import ClientError
 
@@ -23,10 +24,10 @@ def test_client_stays_on_v1beta_without_a_model_prefix():
 
 
 def test_flash_fallback_order_is_bare_ids():
-    assert list(FLASH_MODELS) == ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"]
+    assert list(FLASH_MODELS) == ["gemini-2.5-flash", "gemini-2.0-flash-exp", "gemini-1.5-flash"]
 
 
-def test_not_found_falls_through_and_parses_the_client_payload():
+def test_not_found_falls_through_and_parses_the_client_payload(caplog):
     payload = {
         "is_human": True,
         "has_signal": True,
@@ -54,14 +55,18 @@ def test_not_found_falls_through_and_parses_the_client_payload():
                         }
                     },
                 )
-            assert model == "gemini-2.0-flash"
+            assert model == "gemini-2.0-flash-exp"
             return type("Response", (), {"text": json.dumps(payload)})()
 
     classifier = GeminiClassifier(Settings(gemini_api_key="k", gemini_model="gemini-2.5-flash"))
     classifier._client = type("Client", (), {"models": Models()})()
-    result = asyncio.run(classifier.classify(sample_post()))
+    with caplog.at_level(logging.WARNING):
+        result = asyncio.run(classifier.classify(sample_post()))
 
-    assert seen == ["gemini-2.5-flash", "gemini-2.0-flash"]
+    assert seen == ["gemini-2.5-flash", "gemini-2.0-flash-exp"]
+    assert "requesting Gemini model gemini-2.5-flash" in caplog.text
+    assert "requesting Gemini model gemini-2.0-flash-exp" in caplog.text
+    assert "requesting Gemini model models/" not in caplog.text
     assert result.error is None
     assert result.is_human is True
     assert result.has_signal is True

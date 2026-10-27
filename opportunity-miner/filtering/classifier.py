@@ -45,7 +45,7 @@ ATOMIC_QUESTIONS: tuple[tuple[str, str], ...] = (
 
 _REQUIRED = ("is_human", "has_signal", "is_relevant", "should_forward")
 _FLAG_KEYS = tuple(key for key, _question in ATOMIC_QUESTIONS)
-FLASH_MODELS = ("gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash")
+FLASH_MODELS = ("gemini-2.5-flash", "gemini-2.0-flash-exp", "gemini-1.5-flash")
 
 
 def gemini_model_id(name: str | None) -> str:
@@ -230,12 +230,17 @@ class GeminiClassifier:
         client = self._sdk()
         last: Exception | None = None
         for model in gemini_model_candidates(self.settings.gemini_model):
+            model_id = gemini_model_id(model)
+            logger.warning("requesting Gemini model %s", model_id)
             try:
-                text = self._complete(client, model, prompt)
+                text = self._complete(client, model_id, prompt)
             except Exception as exc:
                 last = exc
                 if _model_missing(exc):
-                    logger.warning("gemini model %s was not found; trying the next id", model)
+                    logger.warning(
+                        "Gemini model %s returned 404 NOT_FOUND; trying the next id",
+                        model_id,
+                    )
                     continue
                 raise
             if text.strip():
