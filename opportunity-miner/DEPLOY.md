@@ -17,7 +17,7 @@ cp .env.example .env
 docker compose up -d --build
 ```
 
-Compose binds the app to `127.0.0.1:8000` only and forces `DATABASE_PATH=/app/data/radar.sqlite`, so the file stays on the host at `opportunity-miner/data/radar.sqlite`. Do not open port 8000 in the Hetzner firewall.
+Compose publishes host port 8080 to container port 8000. Inside the container, uvicorn still listens on 8000. `DATABASE_PATH=/app/data/radar.sqlite`, so the file stays on the host at `opportunity-miner/data/radar.sqlite`. Do not open port 8080 in the Hetzner firewall.
 
 ## systemd
 
@@ -38,7 +38,7 @@ After=network-online.target
 [Service]
 WorkingDirectory=/opt/scaneverythin/opportunity-miner
 EnvironmentFile=/opt/scaneverythin/opportunity-miner/.env
-ExecStart=/opt/scaneverythin/opportunity-miner/.venv/bin/uvicorn main:app --host 127.0.0.1 --port 8000
+ExecStart=/opt/scaneverythin/opportunity-miner/.venv/bin/uvicorn main:app --host 127.0.0.1 --port 8080
 Restart=on-failure
 
 [Install]
@@ -61,7 +61,7 @@ sudo apt update && sudo apt install -y caddy
 
 sudo tee /etc/caddy/Caddyfile >/dev/null <<'EOF'
 radar.senindomainin.com {
-    reverse_proxy localhost:8000
+    reverse_proxy localhost:8080
 }
 EOF
 sudo systemctl reload caddy
@@ -78,7 +78,7 @@ server {
     listen 80;
     server_name radar.senindomainin.com;
     location / {
-        proxy_pass http://127.0.0.1:8000;
+        proxy_pass http://127.0.0.1:8080;
         proxy_set_header Host $host;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
