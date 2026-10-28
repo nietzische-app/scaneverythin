@@ -23,13 +23,20 @@ Kurallar:
 - Aha! filtresi: bariz, sıkıcı veya jenerik fikirleri (genel PDF özetleyici, basit sosyal medya planlayıcı, standart lead-gen kazıyıcı, tipik AI müşteri hizmeti botu, herkesin hemen yazacağı birinci derece çözüm) zekice diye yazma.
 - aha_angle: çözümün neden bariz olmadığını 1 veya 2 cümleyle anlat. Barizse bunu açıkça söyle.
 - unfair_advantage: taklidi zorlaştıran hendek, büyüme kancası veya dağıtım numarası.
+- summary_tr: tam 2 sade Türkçe cümle. 5 yaşındaki biri anlasın. DevOps veya bilgisayar bilimi bilgisi isteme.
+- jargon_analogy: fikir Kubernetes, RAG, vektör veritabanı, MCP veya CI/CD kullanıyorsa tek satır somut benzetme yaz. Örnek: Kubernetes = Binlerce sunucuyu otomatik yöneten dijital kargo limanı müdürü. Jargon yoksa boş string.
+- net_problem: kim, nerede, hangi somut eziyeti çekiyor veya kaç para kaybediyor. Formül yasak: "X yapmak isteyen kullanıcılara acı çektiriyor."
+- solution_mechanism: ürün arka planda tam olarak neyi otomatik yapıyor veya neyi tek tıkla bitiriyor.
+- business_model: paranın birimi. "SaaS aboneliği" deyip geçme. Örnek: Cluster başına aylık $49 / lisanslama / sunucu başı komisyon.
+- Şu kalıpları ve yakınlarını yazma: "Gelişmiş arayüz ve kullanıcı dostu yapısıyla ayrışır." "Bu alanda önemli bir boşluk var."
 - Yalnızca aşağıdaki şemaya uyan tek bir JSON nesnesi döndür. Markdown yazma.
 
 {
   "title_tr": "kısa fırsat adı",
-  "summary_tr": "iki veya üç cümle",
-  "net_problem": "tam olarak kime ne acı çektiriyor",
-  "solution_mechanism": "yazılım problemi nasıl çözüyor",
+  "summary_tr": "tam 2 sade cümle",
+  "jargon_analogy": "jargon varsa tek satır benzetme, yoksa boş",
+  "net_problem": "kim, nerede, hangi somut eziyet veya para kaybı",
+  "solution_mechanism": "arka planda ne otomatik, ne tek tıkla bitiyor",
   "why_now": "neden şimdi",
   "core_problem_or_mechanic": "çekirdek problem veya mekanik",
   "opportunity_type": "Yeni & Kopyalanabilir | Zamanının Ötesinde / Yeniden Canlandırılabilir | TR Pazar Fırsatı",
@@ -55,7 +62,7 @@ Kurallar:
   "risks": ["risk", "risk"],
   "tr_market_analysis": "Türkiye'deki yerel rakipler ve boşluk",
   "our_differentiator": "pazarda nasıl öne geçileceği",
-  "business_model": "hedef kitle ve gelir modeli",
+  "business_model": "kim öder ve fiyat birimi, SaaS aboneliği deme",
   "top_competitors": ["RakipA (Commercial SaaS)", "RakipB (Open Source)"],
   "competitor_weakness": "mevcut çözümlerdeki ana şikayet veya boşluk",
   "search_trend_signal": "Stabil / Niş arama hacmi",

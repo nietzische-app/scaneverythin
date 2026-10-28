@@ -54,6 +54,8 @@ def test_default_model_is_gpt_4o_mini_and_parses_the_brief():
 
     assert len(seen) == 2
     assert seen[0]["model"] == "gpt-4o-mini"
+    assert seen[0]["max_completion_tokens"] == 8192
+    assert seen[1]["max_completion_tokens"] == 8192
     assert seen[1]["response_format"] == {"type": "json_object"}
     system = "\n".join(call["messages"][0]["content"] for call in seen)
     assert seen[0]["messages"][0]["role"] == "system"
@@ -91,6 +93,12 @@ def test_default_model_is_gpt_4o_mini_and_parses_the_brief():
     assert "aha_angle" in system
     assert "unfair_advantage" in system
     assert "cross_domain" in system
+    assert "exactly 2 plain Turkish sentences" in system
+    assert "X yapmak isteyen kullanıcılara acı çektiriyor." in system
+    assert "Gelişmiş arayüz ve kullanıcı dostu yapısıyla ayrışır." in system
+    assert "Bu alanda önemli bir boşluk var." in system
+    assert "Cluster başına aylık $49" in system
+    assert "jargon_analogy" in system
     assert "strictly below 50" in system
     assert Settings(openai_model="gpt-4o").openai_model == "gpt-4o"
     assert Settings(openai_model="").openai_model == "gpt-4o-mini"

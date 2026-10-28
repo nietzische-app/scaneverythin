@@ -49,14 +49,21 @@ def _summary(analysis: dict) -> str:
 def _summary_blocks(analysis: dict, *, markdown: bool) -> list[str]:
     parts = (
         ("🤕", "Net Problem", analysis.get("net_problem")),
-        ("🛠️", "Çözüm Mekanizması", analysis.get("solution_mechanism")),
+        ("🛠️", "Çözüm & Mekanizma", analysis.get("solution_mechanism")),
+        ("💰", "Gelir Modeli", analysis.get("business_model")),
         ("⏳", "Neden Şimdi?", analysis.get("why_now")),
     )
+    summary = str(analysis.get("summary_tr") or "").strip()
+    analogy = str(analysis.get("jargon_analogy") or "").strip()
     filled = [str(value or "").strip() for _emoji, _label, value in parts]
-    if not any(filled):
+    if not any(filled) and not summary and not analogy:
         text = _summary(analysis)
         return [escape_md(text) if markdown else text]
     lines: list[str] = []
+    if summary:
+        lines.append(escape_md(summary) if markdown else summary)
+    if analogy:
+        lines.append(escape_md(analogy) if markdown else analogy)
     for emoji, label, value in parts:
         body = str(value or "").strip() or "—"
         if markdown:
@@ -64,6 +71,28 @@ def _summary_blocks(analysis: dict, *, markdown: bool) -> list[str]:
         else:
             lines.append(f"{emoji} {label}: {body}")
     return lines
+
+
+def text_chunks(text: str, limit: int = 4000) -> list[str]:
+    """Split on line breaks so a Telegram message is not cut mid-sentence."""
+    rest = (text or "").strip()
+    if not rest:
+        return []
+    if limit < 200:
+        limit = 200
+    chunks: list[str] = []
+    while rest:
+        if len(rest) <= limit:
+            chunks.append(rest)
+            break
+        cut = rest.rfind("\n", 0, limit)
+        if cut < limit // 2:
+            cut = limit
+        piece = rest[:cut].strip()
+        rest = rest[cut:].strip()
+        if piece:
+            chunks.append(piece)
+    return chunks
 
 
 def _domain_line(analysis: dict, *, markdown: bool) -> str:
@@ -283,7 +312,7 @@ def plain_alert(view: InsightView) -> str:
             _field(analysis, "judge_verdict"),
             "━━━━━━━━━━━━━━━━━━━━",
         ]
-    ).strip()[:3900]
+    ).strip()
 
 
 class TelegramNotifier:
@@ -319,11 +348,7 @@ class TelegramNotifier:
                         return sent
                     logger.warning("telegram photo rejected for insight %s; sending text", view.insight_id)
             markup = mvp_keyboard(view.insight_id)
-            sent = await self._post(client, url, format_alert(view), "MarkdownV2", markup)
-            if sent:
-                return sent
-            logger.info("telegram markdown rejected for insight %s; sending plain text", view.insight_id)
-            return await self._post(client, url, plain_alert(view), None, markup)
+            return await self._send_card_text(client, url, view, markup)
         finally:
             if close_after:
                 await client.aclose()
@@ -381,9 +406,34 @@ class TelegramNotifier:
                 logger.warning("telegram photo request failed: %s", exc)
                 return 0
             if response.status_code == 200:
-                return _message_id(response)
+                message_id = _message_id(response)
+                if len(plain_alert(view)) > 1024:
+                    text_url = _API.format(token=token, method="sendMessage")
+                    await self._send_card_text(client, text_url, view, None)
+                return message_id
             logger.warning("telegram photo status %s: %s", response.status_code, response.text[:300])
         return 0
+
+    async def _send_card_text(
+        self,
+        client: httpx.AsyncClient,
+        url: str,
+        view: InsightView,
+        reply_markup: dict | None,
+    ) -> int:
+        markdown_chunks = text_chunks(format_alert(view))
+        first = await self._post(client, url, markdown_chunks[0] if markdown_chunks else "—", "MarkdownV2", reply_markup)
+        if first:
+            for extra in markdown_chunks[1:]:
+                await self._post(client, url, extra, "MarkdownV2", None)
+            return first
+        logger.info("telegram markdown rejected for insight %s; sending plain text", view.insight_id)
+        plain_chunks = text_chunks(plain_alert(view))
+        first = await self._post(client, url, plain_chunks[0] if plain_chunks else "—", None, reply_markup)
+        if first:
+            for extra in plain_chunks[1:]:
+                await self._post(client, url, extra, None, None)
+        return first
 
     async def _post(
         self,

@@ -80,6 +80,7 @@ class Opportunity(BaseModel):
 
     title_tr: str
     summary_tr: str
+    jargon_analogy: str = ""
     core_problem_or_mechanic: str
     opportunity_type: str = "other"
     project_scale: str = ""
@@ -212,7 +213,8 @@ def opportunity_from_payload(payload: dict[str, Any]) -> Opportunity:
     title = clip(str(payload.get("title_tr") or "").strip(), 180) or "İsimsiz fırsat"
     return Opportunity(
         title_tr=title,
-        summary_tr=clip(str(payload.get("summary_tr") or "").strip(), 900),
+        summary_tr=clip(str(payload.get("summary_tr") or "").strip(), 1500),
+        jargon_analogy=clip(str(payload.get("jargon_analogy") or "").strip(), 400),
         core_problem_or_mechanic=clip(str(payload.get("core_problem_or_mechanic") or "").strip(), 600),
         opportunity_type=kind,
         project_scale=clip(str(payload.get("project_scale") or "").strip(), 80),
@@ -226,10 +228,10 @@ def opportunity_from_payload(payload: dict[str, Any]) -> Opportunity:
         risks=risks,
         tr_market_analysis=clip(str(payload.get("tr_market_analysis") or "").strip(), 1200),
         our_differentiator=clip(str(payload.get("our_differentiator") or "").strip(), 900),
-        business_model=clip(str(payload.get("business_model") or "").strip(), 600),
-        net_problem=clip(str(payload.get("net_problem") or "").strip(), 600),
-        solution_mechanism=clip(str(payload.get("solution_mechanism") or "").strip(), 600),
-        why_now=clip(str(payload.get("why_now") or "").strip(), 600),
+        business_model=clip(str(payload.get("business_model") or "").strip(), 800),
+        net_problem=clip(str(payload.get("net_problem") or "").strip(), 1200),
+        solution_mechanism=clip(str(payload.get("solution_mechanism") or "").strip(), 1200),
+        why_now=clip(str(payload.get("why_now") or "").strip(), 800),
         suggested_domains=domains,
         top_competitors=_top_competitors(payload.get("top_competitors")),
         competitor_weakness=clip(str(payload.get("competitor_weakness") or "").strip(), 900),

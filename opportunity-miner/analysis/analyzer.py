@@ -32,7 +32,8 @@ SCOUT_PROMPT = (
     "market_scale must be exactly one of: Micro, SMB, Enterprise B2B, B2C. "
     "tr_market_analysis: Türkiye pazarındaki yerel rekabet ve boşluklar. "
     "our_differentiator: Bizim ne farkımız olabilir, pazarda nasıl öne geçeriz (Moat / Valör). "
-    "business_model: hedef kitle ve gelir modeli. "
+    "business_model: who pays, and the concrete price unit. "
+    "Do not stop at SaaS aboneliği. Name the unit, for example Cluster başına aylık $49, lisanslama, or sunucu başı komisyon. "
     "top_competitors: 2 or 3 main global or local competitors. "
     "Each item names the competitor and an estimated model or presence, "
     "for example CompetitorA (Commercial SaaS) or CompetitorB (Open Source). "
@@ -45,10 +46,17 @@ SCOUT_PROMPT = (
     "aha_angle: 1 or 2 Turkish sentences on exactly why this solution is non-obvious and clever. "
     "unfair_advantage: the unique moat, growth hook, or distribution trick that makes this hard to beat. "
     "If the idea is obvious, boring, or generic, say that plainly in aha_angle instead of inventing cleverness. "
-    "The summary must be explicit, actionable, and easy to understand. Avoid abstract jargon. "
-    "net_problem: Tam olarak kime, ne acı çektiriyor? "
-    "solution_mechanism: Bu yazılım problemi tam olarak nasıl çözüyor? "
+    "summary_tr: exactly 2 plain Turkish sentences. Explain like I'm 5. No DevOps or computer-science degree required. "
+    "jargon_analogy: if the idea uses Kubernetes, RAG, a vector database, MCP, or CI/CD, add one Turkish line that turns that jargon into a physical analogy, "
+    "for example Kubernetes = Binlerce sunucuyu otomatik yöneten dijital kargo limanı müdürü. Otherwise leave jargon_analogy empty. "
+    "net_problem: Tam olarak kime, ne acı çektiriyor? Name the person, the place, and the concrete operational nightmare or the money they lose. "
+    "Example shape: Şirketler karmaşık Kubernetes YAML dosyalarını yönetmek için ayda binlerce dolar DevOps mühendisine ödüyor. "
+    "solution_mechanism: what the product automates in the background, or what it finishes in one click. "
     "why_now: Pazardaki güncel fırsat veya trend nedir? "
+    "Strictly forbid these filler formulas, and do not paraphrase them: "
+    "X yapmak isteyen kullanıcılara acı çektiriyor. "
+    "Gelişmiş arayüz ve kullanıcı dostu yapısıyla ayrışır. "
+    "Bu alanda önemli bir boşluk var. "
     "Evaluate each idea as one of three opportunity types, not only as a local Turkish clone. "
     "opportunity_type must be exactly one of: "
     "Yeni & Kopyalanabilir (Fresh & Copyable: a modern product that is new globally and can be cloned and adapted quickly); "
@@ -104,6 +112,9 @@ JUDGE_PROMPT = (
     "that was not feasible before. "
     "A score of 80 or higher requires at least 2 of those pillars. Otherwise keep the score at 79 or below. "
     "If the Scout left aha_angle or unfair_advantage empty, fill them in Turkish. Do not invent a clever angle for an obvious idea. "
+    "If net_problem, summary_tr, solution_mechanism, or business_model is generic filler "
+    "(acı çektiriyor as a formula, kullanıcı dostu arayüz, önemli bir boşluk var, or SaaS aboneliği with no price unit), "
+    "set opportunity_score strictly below 50. "
     "Provide an 'opportunity_score' strictly between 0 and 100 based on SaaS / business potential. "
     "Return that score as an integer. "
     "Return JSON with opportunity_score, judge_verdict, saturated_wrapper, open_source_alternative, "
@@ -182,7 +193,7 @@ class OpenAIAnalyzer:
             scout = parse_json_object(scout_text)
             judge_user = (
                 "Scout brief JSON:\n"
-                + clip(json.dumps(scout, ensure_ascii=False), 6000)
+                + clip(json.dumps(scout, ensure_ascii=False), 14000)
                 + f"\n\nBaşlık: {post.title or ''}"
             )
             judge_text = await self._complete(judge_user, clause, system=JUDGE_PROMPT)
@@ -245,6 +256,7 @@ class OpenAIAnalyzer:
         kwargs = {
             "model": self.settings.openai_model,
             "temperature": 0.3,
+            "max_completion_tokens": 8192,
             "messages": [
                 {"role": "system", "content": system},
                 {"role": "user", "content": user_prompt},
