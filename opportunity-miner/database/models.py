@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -100,6 +101,7 @@ class Opportunity(BaseModel):
     search_trend_signal: str = ""
     aha_angle: str = ""
     unfair_advantage: str = ""
+    concept_key: str = ""
     aha_pillars: list[str] = Field(default_factory=list)
     obvious: bool = False
     market_scale: str = ""
@@ -177,6 +179,15 @@ class ScanReport(BaseModel):
     item_errors: list[str] = Field(default_factory=list)
 
 
+def normalize_concept_key(value: object) -> str:
+    """Lowercase snake_case mechanic id. Brand punctuation is stripped."""
+    text = str(value or "").strip().lower().replace("-", " ").replace("_", " ")
+    text = "_".join(part for part in text.split() if part)
+    text = re.sub(r"[^a-z0-9_]", "", text)
+    text = re.sub(r"_+", "_", text).strip("_")
+    return text[:80]
+
+
 def opportunity_from_payload(payload: dict[str, Any]) -> Opportunity:
     """Normalize an OpenAI JSON object into the brief we store and notify."""
     market_raw = payload.get("turkish_market") if isinstance(payload.get("turkish_market"), dict) else {}
@@ -238,6 +249,7 @@ def opportunity_from_payload(payload: dict[str, Any]) -> Opportunity:
         search_trend_signal=clip(str(payload.get("search_trend_signal") or "").strip(), 240),
         aha_angle=clip(str(payload.get("aha_angle") or "").strip(), 500),
         unfair_advantage=clip(str(payload.get("unfair_advantage") or "").strip(), 400),
+        concept_key=normalize_concept_key(payload.get("concept_key")),
         aha_pillars=_short_list(payload.get("aha_pillars"), 4, 40),
         obvious=_flag(payload.get("obvious")),
         market_scale=_market_scale(payload.get("market_scale")),

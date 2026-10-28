@@ -8,10 +8,18 @@ from typing import Protocol
 
 import httpx
 
-from analysis.analyzer import OpenAIAnalyzer, OpenAIUnavailable, clears_aha_bar
+from analysis.analyzer import DuplicateConcept, OpenAIAnalyzer, OpenAIUnavailable, clears_aha_bar
 from config import Settings
 from database.db import Database
-from database.models import Classification, InsightView, ItemRecord, Opportunity, RawPost, ScanReport
+from database.models import (
+    Classification,
+    InsightView,
+    ItemRecord,
+    Opportunity,
+    RawPost,
+    ScanReport,
+    normalize_concept_key,
+)
 from filtering.classifier import GeminiClassifier
 from filtering.heuristic import heuristic_reject
 from ingestion import build_fetchers
@@ -258,6 +266,11 @@ class ScanService:
             return
         try:
             opportunity = await self.analyzer.analyze(post)
+        except DuplicateConcept:
+            logger.info("Item %s SKIPPED - Duplicate Concept", row.id)
+            await self.db.update_item(row.id, status="filtered_out", note="duplicate_concept")
+            await self._inc(report, "duplicates")
+            return
         except OpenAIUnavailable as exc:
             logger.warning("OpenAI stopped analysis for %s: %s", row.external_id, exc)
             async with self._slot_lock:
@@ -295,6 +308,11 @@ class ScanService:
         required = notify_threshold(self.settings.notify_min_opportunity_score, dial)
         logger.info("market dial %.2f; notify threshold %s", dial, required)
         for view in pending:
+            concept = normalize_concept_key((view.analysis or {}).get("concept_key"))
+            if concept and await self.db.concept_seen(concept, prior_to=view.insight_id):
+                logger.info("Item %s SKIPPED - Duplicate Concept", view.item_id)
+                await self.db.set_telegram_state(view.insight_id, 2)
+                continue
             aha_ok = clears_aha_bar(view.opportunity_score, view.analysis)
             passed = view.opportunity_score >= required and aha_ok
             logger.info(

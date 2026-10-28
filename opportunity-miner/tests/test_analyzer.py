@@ -39,6 +39,15 @@ class _Client:
         self.closed = True
 
 
+def test_concept_key_strips_brand_punctuation():
+    from database.models import normalize_concept_key
+
+    assert normalize_concept_key("Kubernetes Deployment Simplifier") == "kubernetes_deployment_simplifier"
+    assert normalize_concept_key("github-pr-to-video-generator") == "github_pr_to_video_generator"
+    assert normalize_concept_key("pdf_document_qna_bot") == "pdf_document_qna_bot"
+    assert normalize_concept_key("") == ""
+
+
 def test_default_model_is_gpt_4o_mini_and_parses_the_brief():
     seen: list[dict] = []
 
@@ -99,6 +108,10 @@ def test_default_model_is_gpt_4o_mini_and_parses_the_brief():
     assert "Bu alanda önemli bir boşluk var." in system
     assert "Cluster başına aylık $49" in system
     assert "jargon_analogy" in system
+    assert "concept_key" in system
+    assert "kubernetes_deployment_simplifier" in system
+    assert "github_pr_to_video_generator" in system
+    assert "pdf_document_qna_bot" in system
     assert "strictly below 50" in system
     assert Settings(openai_model="gpt-4o").openai_model == "gpt-4o"
     assert Settings(openai_model="").openai_model == "gpt-4o-mini"

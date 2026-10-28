@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import json
 import tempfile
 import unittest
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from tests.support import (
@@ -16,7 +18,7 @@ from tests.support import (
     sample_post,
 )
 
-from analysis.analyzer import OpenAIUnavailable
+from analysis.analyzer import OpenAIAnalyzer, OpenAIUnavailable
 from config import Settings
 from delivery.telegram_bot import TelegramNotifier
 from database.db import Database
@@ -147,6 +149,191 @@ class PipelineTests(unittest.IsolatedAsyncioTestCase):
         insights = await self.db.list_insights()
         self.assertEqual(insights[0].analysis["title_tr"], "Tahsilat hatırlatıcısı")
         self.assertEqual(insights[0].telegram_sent, 1)
+
+    async def test_repeat_concept_skips_the_judge(self) -> None:
+        scout = json.dumps(
+            {
+                "title_tr": "Kupe Cloud",
+                "concept_key": "kubernetes_deployment_simplifier",
+                "summary_tr": "Şirket YAML ile boğuşuyor. Araç bunu tek tıkla kuruyor.",
+                "aha_pillars": ["friction_hack", "why_now"],
+            }
+        )
+        judge = json.dumps(
+            {
+                "opportunity_score": 82,
+                "judge_verdict": "Cluster başı ücret öderler.",
+                "aha_pillars": ["friction_hack", "why_now"],
+                "obvious": False,
+                "concept_key": "kubernetes_deployment_simplifier",
+            }
+        )
+        calls = {"scout": 0, "judge": 0}
+
+        def complete(prompt: str) -> str:
+            if "Scout brief JSON" in prompt:
+                calls["judge"] += 1
+                return judge
+            calls["scout"] += 1
+            return scout
+
+        notifier = ScriptedNotifier()
+        service = ScanService(
+            self.settings(),
+            self.db,
+            fetchers=[
+                StaticFetcher(
+                    [
+                        sample_post(external_id="1", url="https://news.ycombinator.com/item?id=1", title="Kupe Cloud"),
+                        sample_post(external_id="2", url="https://news.ycombinator.com/item?id=2", title="EasyKube"),
+                    ]
+                )
+            ],
+            classifier=ScriptedClassifier(gold_classification()),
+            analyzer=OpenAIAnalyzer(self.settings(), complete=complete, db=self.db),
+            notifier=notifier,
+        )
+        with self.assertLogs("pipeline", level="INFO") as logs:
+            report = await service.run()
+        self.assertIn("SKIPPED - Duplicate Concept", "\n".join(logs.output))
+        self.assertEqual(calls["scout"], 2)
+        self.assertEqual(calls["judge"], 1)
+        self.assertEqual(report.analyzed, 1)
+        self.assertEqual(report.notified, 1)
+        self.assertEqual(report.duplicates, 1)
+        self.assertEqual(len(notifier.sent), 1)
+        async with self.db.conn.execute("SELECT concept_key FROM insights") as cursor:
+            row = await cursor.fetchone()
+        self.assertEqual(row["concept_key"], "kubernetes_deployment_simplifier")
+
+    async def test_concept_older_than_30_days_is_not_a_duplicate(self) -> None:
+        await self.db.enqueue(sample_post(external_id="old", url="https://news.ycombinator.com/item?id=9"))
+        old_item = (await self.db.list_items(status="new"))[0]
+        await self.db.update_item(old_item.id, status="analyzed")
+        stored = brief().model_copy(update={"concept_key": "pdf_document_qna_bot"})
+        insight_id = await self.db.add_insight(
+            item_id=old_item.id,
+            confidence=90,
+            opportunity_score=82,
+            flags_json="{}",
+            analysis_json=stored.model_dump_json(),
+        )
+        aged = (datetime.now(timezone.utc) - timedelta(days=40)).isoformat(timespec="seconds")
+        await self.db.conn.execute(
+            "UPDATE insights SET created_at = ?, telegram_sent = 1 WHERE id = ?",
+            (aged, insight_id),
+        )
+        await self.db.conn.commit()
+        seen = {"judge": 0}
+
+        def complete(prompt: str) -> str:
+            if "Scout brief JSON" in prompt:
+                seen["judge"] += 1
+                return json.dumps(
+                    {
+                        "opportunity_score": 82,
+                        "judge_verdict": "Hâlâ boş.",
+                        "aha_pillars": ["friction_hack", "viral"],
+                        "concept_key": "pdf_document_qna_bot",
+                    }
+                )
+            return json.dumps(
+                {
+                    "title_tr": "AskPDF",
+                    "concept_key": "pdf_document_qna_bot",
+                    "summary_tr": "PDF'te aranan cümle kayboluyor. Soru yazınca ilgili sayfayı açıyor.",
+                    "aha_pillars": ["friction_hack", "viral"],
+                }
+            )
+
+        notifier = ScriptedNotifier()
+        service = ScanService(
+            self.settings(),
+            self.db,
+            fetchers=[
+                StaticFetcher(
+                    [sample_post(external_id="new", url="https://news.ycombinator.com/item?id=10", title="AskPDF")]
+                )
+            ],
+            classifier=ScriptedClassifier(gold_classification()),
+            analyzer=OpenAIAnalyzer(self.settings(), complete=complete, db=self.db),
+            notifier=notifier,
+        )
+        report = await service.run()
+        self.assertEqual(seen["judge"], 1)
+        self.assertEqual(report.analyzed, 1)
+        self.assertEqual(report.notified, 1)
+        self.assertEqual(len(notifier.sent), 1)
+
+    async def test_concept_from_the_last_30_days_skips_the_judge(self) -> None:
+        await self.db.enqueue(sample_post(external_id="old", url="https://news.ycombinator.com/item?id=8"))
+        old_item = (await self.db.list_items(status="new"))[0]
+        await self.db.update_item(old_item.id, status="analyzed")
+        stored = brief().model_copy(update={"concept_key": "pdf_document_qna_bot"})
+        insight_id = await self.db.add_insight(
+            item_id=old_item.id,
+            confidence=90,
+            opportunity_score=82,
+            flags_json="{}",
+            analysis_json=stored.model_dump_json(),
+        )
+        await self.db.set_telegram_state(insight_id, 1)
+        seen = {"judge": 0}
+
+        def complete(prompt: str) -> str:
+            if "Scout brief JSON" in prompt:
+                seen["judge"] += 1
+            return json.dumps({"title_tr": "AskPDF", "concept_key": "pdf_document_qna_bot", "summary_tr": "Bir. İki."})
+
+        service = ScanService(
+            self.settings(),
+            self.db,
+            fetchers=[
+                StaticFetcher(
+                    [sample_post(external_id="new", url="https://news.ycombinator.com/item?id=11", title="AskPDF")]
+                )
+            ],
+            classifier=ScriptedClassifier(gold_classification()),
+            analyzer=OpenAIAnalyzer(self.settings(), complete=complete, db=self.db),
+            notifier=ScriptedNotifier(),
+        )
+        with self.assertLogs("pipeline", level="INFO") as logs:
+            report = await service.run()
+        self.assertIn("SKIPPED - Duplicate Concept", "\n".join(logs.output))
+        self.assertEqual(seen["judge"], 0)
+        self.assertEqual(report.analyzed, 0)
+        self.assertEqual(report.duplicates, 1)
+        self.assertEqual(report.notified, 0)
+
+    async def test_second_pending_card_for_the_same_concept_is_not_sent(self) -> None:
+        first = brief().model_copy(update={"concept_key": "github_pr_to_video_generator"})
+        second = brief(title="RepoToVideo").model_copy(update={"concept_key": "github_pr_to_video_generator"})
+        for index, card in enumerate((first, second), start=1):
+            post = sample_post(external_id=str(index), url=f"https://news.ycombinator.com/item?id={index}")
+            await self.db.enqueue(post)
+            item = (await self.db.list_items(status="new"))[0]
+            await self.db.update_item(item.id, status="analyzed")
+            await self.db.add_insight(
+                item_id=item.id,
+                confidence=90,
+                opportunity_score=82,
+                flags_json="{}",
+                analysis_json=card.model_dump_json(),
+            )
+        notifier = ScriptedNotifier()
+        service = ScanService(
+            self.settings(),
+            self.db,
+            fetchers=[],
+            classifier=ScriptedClassifier(gold_classification()),
+            analyzer=ScriptedAnalyzer(brief()),
+            notifier=notifier,
+        )
+        with self.assertLogs("pipeline", level="INFO") as logs:
+            report = await service.run()
+        self.assertIn("SKIPPED - Duplicate Concept", "\n".join(logs.output))
+        self.assertEqual(report.notified, 1)
+        self.assertEqual(len(notifier.sent), 1)
 
     async def test_low_confidence_never_reaches_the_deep_model(self) -> None:
         weak = Classification(

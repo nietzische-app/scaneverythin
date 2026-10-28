@@ -124,6 +124,14 @@ class ApiTests(unittest.TestCase):
         self.assertIn("elle kovalıyor", concrete)
         self.assertIn("kargo limanı", concrete)
         self.assertIn("Ajans başına aylık $49", concrete)
+        analysis["summary_tr"] = "Birinci cümle bitti. İkinci cümle bitti. Üçüncü cümle kalmamalı."
+        analysis["jargon_analogy"] = ""
+        analysis["net_problem"] = "Ekip Kubernetes YAML için ayda 5000 dolar ödüyor."
+        view.analysis = analysis
+        plain = plain_alert(view)
+        self.assertIn("Birinci cümle bitti. İkinci cümle bitti.", plain)
+        self.assertNotIn("Üçüncü", plain)
+        self.assertIn("kargo limanı", plain)
         from database.models import InsightView
 
         long_view = InsightView(

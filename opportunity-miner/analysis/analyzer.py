@@ -15,7 +15,7 @@ from pathlib import Path
 from openai import APIStatusError, OpenAI
 
 from config import Settings
-from database.models import Opportunity, RawPost, opportunity_from_payload
+from database.models import Opportunity, RawPost, normalize_concept_key, opportunity_from_payload
 from textutil import clip, parse_json_object
 
 logger = logging.getLogger(__name__)
@@ -49,6 +49,10 @@ SCOUT_PROMPT = (
     "summary_tr: exactly 2 plain Turkish sentences. Explain like I'm 5. No DevOps or computer-science degree required. "
     "jargon_analogy: if the idea uses Kubernetes, RAG, a vector database, MCP, or CI/CD, add one Turkish line that turns that jargon into a physical analogy, "
     "for example Kubernetes = Binlerce sunucuyu otomatik yöneten dijital kargo limanı müdürü. Otherwise leave jargon_analogy empty. "
+    "concept_key: one lowercase snake_case id for the underlying mechanic and problem. Ignore brand names and titles. "
+    "Kupe Cloud and EasyKube both become kubernetes_deployment_simplifier. "
+    "AI Video Gen from PR and RepoToVideo both become github_pr_to_video_generator. "
+    "PDF Chatbot and AskPDF both become pdf_document_qna_bot. "
     "net_problem: Tam olarak kime, ne acı çektiriyor? Name the person, the place, and the concrete operational nightmare or the money they lose. "
     "Example shape: Şirketler karmaşık Kubernetes YAML dosyalarını yönetmek için ayda binlerce dolar DevOps mühendisine ödüyor. "
     "solution_mechanism: what the product automates in the background, or what it finishes in one click. "
@@ -112,6 +116,9 @@ JUDGE_PROMPT = (
     "that was not feasible before. "
     "A score of 80 or higher requires at least 2 of those pillars. Otherwise keep the score at 79 or below. "
     "If the Scout left aha_angle or unfair_advantage empty, fill them in Turkish. Do not invent a clever angle for an obvious idea. "
+    "concept_key: the mechanic id in lowercase snake_case, with no brand or product title. "
+    "If the Scout key names a product instead of the mechanic, replace it. "
+    "Examples: kubernetes_deployment_simplifier, github_pr_to_video_generator, pdf_document_qna_bot. "
     "If net_problem, summary_tr, solution_mechanism, or business_model is generic filler "
     "(acı çektiriyor as a formula, kullanıcı dostu arayüz, önemli bir boşluk var, or SaaS aboneliği with no price unit), "
     "set opportunity_score strictly below 50. "
@@ -119,7 +126,7 @@ JUDGE_PROMPT = (
     "Return that score as an integer. "
     "Return JSON with opportunity_score, judge_verdict, saturated_wrapper, open_source_alternative, "
     "mrr_likely, devtool_class, top_competitors, competitor_weakness, search_trend_signal, "
-    "obvious, aha_pillars, aha_angle, and unfair_advantage."
+    "obvious, aha_pillars, aha_angle, unfair_advantage, and concept_key."
 )
 
 # Scout owns the brief the rest of the app already reads. The Judge owns the score.
@@ -144,6 +151,14 @@ _BLOCKED_STATUS = {401, 403, 429}
 
 class OpenAIUnavailable(RuntimeError):
     """Auth or quota failure. The scan leaves the post queued and moves on."""
+
+
+class DuplicateConcept(Exception):
+    """This mechanic was already stored in the last 30 days. Do not call the Judge."""
+
+    def __init__(self, concept_key: str) -> None:
+        super().__init__(concept_key)
+        self.concept_key = concept_key
 
 
 def render_prompt(template: str, post: RawPost, body_limit: int = 4000) -> str:
@@ -174,6 +189,8 @@ class OpenAIAnalyzer:
         self._complete_override = complete
         self._db = db
         self._client: OpenAI | None = None
+        self._concepts: set[str] = set()
+        self._concept_lock = asyncio.Lock()
 
     @property
     def available(self) -> bool:
@@ -191,15 +208,41 @@ class OpenAIAnalyzer:
         async def _run() -> Opportunity:
             scout_text = await self._complete(user_prompt, system=SCOUT_PROMPT)
             scout = parse_json_object(scout_text)
-            judge_user = (
-                "Scout brief JSON:\n"
-                + clip(json.dumps(scout, ensure_ascii=False), 14000)
-                + f"\n\nBaşlık: {post.title or ''}"
-            )
-            judge_text = await self._complete(judge_user, clause, system=JUDGE_PROMPT)
-            return merge_committee(scout, parse_json_object(judge_text))
+            scout_key = normalize_concept_key(scout.get("concept_key") if isinstance(scout, dict) else "")
+            # shortcut: exact concept_key match, not a similarity search; a second brand name only collapses after the Judge rewrites it
+            if scout_key and await self._concept_taken(scout_key):
+                raise DuplicateConcept(scout_key)
+            try:
+                judge_user = (
+                    "Scout brief JSON:\n"
+                    + clip(json.dumps(scout, ensure_ascii=False), 14000)
+                    + f"\n\nBaşlık: {post.title or ''}"
+                )
+                judge_text = await self._complete(judge_user, clause, system=JUDGE_PROMPT)
+                opportunity = merge_committee(scout, parse_json_object(judge_text))
+            except Exception:
+                self._release_concept(scout_key)
+                raise
+            final = opportunity.concept_key
+            if final and final != scout_key and await self._concept_taken(final):
+                self._release_concept(scout_key)
+                raise DuplicateConcept(final)
+            return opportunity
 
         return await asyncio.wait_for(_run(), timeout=self.settings.analyzer_timeout_seconds)
+
+    async def _concept_taken(self, key: str) -> bool:
+        async with self._concept_lock:
+            if key in self._concepts:
+                return True
+            if self._db is not None and await self._db.concept_seen(key):
+                return True
+            self._concepts.add(key)
+            return False
+
+    def _release_concept(self, key: str) -> None:
+        if key:
+            self._concepts.discard(key)
 
     async def aclose(self) -> None:
         client = self._client
@@ -295,6 +338,8 @@ def merge_committee(scout: dict, judge: dict) -> Opportunity:
         payload["aha_pillars"] = judge.get("aha_pillars")
     if "obvious" in judge:
         payload["obvious"] = judge.get("obvious")
+    if not _blank(judge.get("concept_key")):
+        payload["concept_key"] = judge.get("concept_key")
     opportunity = opportunity_from_payload(payload)
     gated = apply_judge_gates(opportunity.opportunity_score, judge)
     verdict = _stamp_devtool_verdict(opportunity.judge_verdict, judge, gated)

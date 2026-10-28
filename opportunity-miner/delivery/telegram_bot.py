@@ -38,6 +38,42 @@ def _field(analysis: dict, key: str) -> str:
     return value or "—"
 
 
+_JARGON_ANALOGIES = (
+    ("kubernetes", "Kubernetes = Binlerce sunucuyu otomatik yöneten dijital kargo limanı müdürü"),
+    ("vektör veritaban", "Vektör veritabanı = Anlamca benzeyen notları yan yana koyan bir dosya dolabı"),
+    ("vector database", "Vektör veritabanı = Anlamca benzeyen notları yan yana koyan bir dosya dolabı"),
+    ("vector db", "Vektör veritabanı = Anlamca benzeyen notları yan yana koyan bir dosya dolabı"),
+    ("ci/cd", "CI/CD = Her kaydedişte paketi kontrol edip yerine koyan kurye"),
+    ("rag", "RAG = Her seferinde bütün kitabı okumak yerine, önce doğru sayfayı bulan yardımcı"),
+    ("mcp", "MCP = Yapay zekanın dışarıdaki araçları tek fişle kullanmasını sağlayan priz"),
+)
+
+
+def _two_sentences(text: str) -> str:
+    parts = re.split(r"(?<=[.!?…])\s+", text.strip())
+    kept = [part.strip() for part in parts if part.strip()][:2]
+    return " ".join(kept)
+
+
+def _analogy_line(analysis: dict, summary: str) -> str:
+    given = str(analysis.get("jargon_analogy") or "").strip()
+    if given:
+        return given
+    blob = " ".join(
+        str(analysis.get(name) or "")
+        for name in ("net_problem", "solution_mechanism", "core_problem_or_mechanic", "summary_tr")
+    )
+    blob = f"{summary} {blob}".casefold()
+    for needle, line in _JARGON_ANALOGIES:
+        if needle in {"rag", "mcp"}:
+            if re.search(rf"\b{needle}\b", blob):
+                return line
+            continue
+        if needle in blob:
+            return line
+    return ""
+
+
 def _summary(analysis: dict) -> str:
     summary = str(analysis.get("summary_tr") or "").strip()
     problem = str(analysis.get("core_problem_or_mechanic") or "").strip()
@@ -53,8 +89,8 @@ def _summary_blocks(analysis: dict, *, markdown: bool) -> list[str]:
         ("💰", "Gelir Modeli", analysis.get("business_model")),
         ("⏳", "Neden Şimdi?", analysis.get("why_now")),
     )
-    summary = str(analysis.get("summary_tr") or "").strip()
-    analogy = str(analysis.get("jargon_analogy") or "").strip()
+    summary = _two_sentences(str(analysis.get("summary_tr") or ""))
+    analogy = _analogy_line(analysis, summary)
     filled = [str(value or "").strip() for _emoji, _label, value in parts]
     if not any(filled) and not summary and not analogy:
         text = _summary(analysis)
