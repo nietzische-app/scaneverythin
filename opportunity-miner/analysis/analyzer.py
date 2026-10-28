@@ -46,6 +46,9 @@ SCOUT_PROMPT = (
     "aha_angle: 1 or 2 Turkish sentences on exactly why this solution is non-obvious and clever. "
     "unfair_advantage: the unique moat, growth hook, or distribution trick that makes this hard to beat. "
     "If the idea is obvious, boring, or generic, say that plainly in aha_angle instead of inventing cleverness. "
+    "If the post is an old problem with no unlock from about the last 6 months, or a job a general chatbot already does "
+    "(PDF chat, rewrite, meeting notes, generic support bot, generic image or video wrapper), do not dress it up as a startup. "
+    "Say that in aha_angle and keep the draft score under 50. "
     "summary_tr: exactly 2 plain Turkish sentences. Explain like I'm 5. No DevOps or computer-science degree required. "
     "jargon_analogy: if the idea uses Kubernetes, RAG, a vector database, MCP, or CI/CD, add one Turkish line that turns that jargon into a physical analogy, "
     "for example Kubernetes = Binlerce sunucuyu otomatik yöneten dijital kargo limanı müdürü. Otherwise leave jargon_analogy empty. "
@@ -114,7 +117,12 @@ JUDGE_PROMPT = (
     "viral: the product markets itself through its execution flow or a public data trigger. "
     "why_now: a technical unlock from about the last 6 months (MCP, a newly opened public API, or a recent regulation) "
     "that was not feasible before. "
-    "A score of 80 or higher requires at least 2 of those pillars. Otherwise keep the score at 79 or below. "
+    "Passing requires why_now plus at least one other pillar. Otherwise set opportunity_score strictly below 50. Do not leave it at 79. "
+    "Set stale_problem true when the problem and the usual fix are old and nothing from about the last 6 months newly makes the product possible. "
+    "Set ai_solved true when ChatGPT, Claude, Cursor, or another general AI product already does the job without this startup. "
+    "Examples: PDF chat, summarizers, text rewriters, meeting notes, generic customer-service bots, basic image or video wrappers. "
+    "Do not set ai_solved for a non-obvious mechanic that merely uses a model, and do not set it for AI-native infrastructure. "
+    "Either flag forces opportunity_score strictly below 50. "
     "If the Scout left aha_angle or unfair_advantage empty, fill them in Turkish. Do not invent a clever angle for an obvious idea. "
     "concept_key: the mechanic id in lowercase snake_case, with no brand or product title. "
     "If the Scout key names a product instead of the mechanic, replace it. "
@@ -126,7 +134,7 @@ JUDGE_PROMPT = (
     "Return that score as an integer. "
     "Return JSON with opportunity_score, judge_verdict, saturated_wrapper, open_source_alternative, "
     "mrr_likely, devtool_class, top_competitors, competitor_weakness, search_trend_signal, "
-    "obvious, aha_pillars, aha_angle, unfair_advantage, and concept_key."
+    "obvious, stale_problem, ai_solved, aha_pillars, aha_angle, unfair_advantage, and concept_key."
 )
 
 # Scout owns the brief the rest of the app already reads. The Judge owns the score.
@@ -142,6 +150,7 @@ def favorite_clause(titles: list[str]) -> str:
         f"[{'; '.join(cleaned)}]. Give higher opportunity scores to projects with similar "
         "tech/business profiles (e.g., accessible B2C/B2B web & mobile tools, automation) "
         "and lower scores to overly niche low-level code/infrastructure utilities. "
+        "Never use that preference to raise a stale problem or a job a general chatbot already does. Those stay under 50. "
         "Do not apply that penalty to AI-native infrastructure such as LLM observability, MCP servers, "
         "agent memory, guardrails, or AI evaluation harnesses."
     )
@@ -338,11 +347,15 @@ def merge_committee(scout: dict, judge: dict) -> Opportunity:
         payload["aha_pillars"] = judge.get("aha_pillars")
     if "obvious" in judge:
         payload["obvious"] = judge.get("obvious")
+    if "stale_problem" in judge:
+        payload["stale_problem"] = judge.get("stale_problem")
+    if "ai_solved" in judge:
+        payload["ai_solved"] = judge.get("ai_solved")
     if not _blank(judge.get("concept_key")):
         payload["concept_key"] = judge.get("concept_key")
     opportunity = opportunity_from_payload(payload)
     gated = apply_judge_gates(opportunity.opportunity_score, judge)
-    verdict = _stamp_devtool_verdict(opportunity.judge_verdict, judge, gated)
+    verdict = _stamp_creativity_verdict(_stamp_devtool_verdict(opportunity.judge_verdict, judge, gated), judge)
     updates: dict = {}
     if gated != opportunity.opportunity_score:
         updates["opportunity_score"] = gated
@@ -370,10 +383,16 @@ def _devtool_kind(judge: dict) -> str:
 def apply_judge_gates(score: int, judge: dict) -> int:
     """Enforce the reject rules in code so a soft model score cannot sneak through."""
     kind = _devtool_kind(judge)
-    if _yes(judge.get("saturated_wrapper")) or kind == "pre_ai" or is_obvious(judge):
+    creative = aha_pillar_count(judge) >= 2 and _has_why_now(judge)
+    if (
+        _yes(judge.get("saturated_wrapper"))
+        or kind == "pre_ai"
+        or is_obvious(judge)
+        or is_stale(judge)
+        or is_ai_solved(judge)
+        or not creative
+    ):
         return min(score, 49)
-    if score >= 80 and aha_pillar_count(judge) < 2:
-        score = 79
     if kind == "ai_infra":
         if score < 80:
             return min(score, 49)
@@ -382,13 +401,23 @@ def apply_judge_gates(score: int, judge: dict) -> int:
 
 
 def clears_aha_bar(score: int, analysis: dict | None) -> bool:
-    """Score 80+ reaches Telegram only with two Aha pillars, and an obvious idea never does."""
+    """Telegram only gets a current, non-obvious idea: why_now plus one more pillar.
+
+    The numeric score is enforced by the notify threshold. This bar is the creative one.
+    """
+    del score
     payload = analysis or {}
-    if is_obvious(payload):
+    if is_obvious(payload) or is_stale(payload) or is_ai_solved(payload):
         return False
-    if int(score) >= 80 and aha_pillar_count(payload) < 2:
-        return False
-    return True
+    return aha_pillar_count(payload) >= 2 and _has_why_now(payload)
+
+
+def is_stale(source: object) -> bool:
+    return isinstance(source, dict) and _yes(source.get("stale_problem"))
+
+
+def is_ai_solved(source: object) -> bool:
+    return isinstance(source, dict) and _yes(source.get("ai_solved"))
 
 
 def is_obvious(source: object) -> bool:
@@ -401,6 +430,14 @@ def is_obvious(source: object) -> bool:
 
 
 def aha_pillar_count(source: object) -> int:
+    return len(_pillar_ids(source))
+
+
+def _has_why_now(source: object) -> bool:
+    return "why_now" in _pillar_ids(source)
+
+
+def _pillar_ids(source: object) -> set[str]:
     raw = source.get("aha_pillars") if isinstance(source, dict) else source
     if isinstance(raw, str):
         items = [part.strip() for part in raw.replace(",", "|").split("|")]
@@ -413,7 +450,7 @@ def aha_pillar_count(source: object) -> int:
         pillar = _pillar_id(item)
         if pillar:
             found.add(pillar)
-    return len(found)
+    return found
 
 
 def _pillar_id(text: str) -> str:
@@ -429,6 +466,18 @@ def _pillar_id(text: str) -> str:
     if "why now" in key or key in {"unlock", "regulation"}:
         return "why_now"
     return ""
+
+
+def _stamp_creativity_verdict(verdict: str, judge: dict) -> str:
+    if is_ai_solved(judge):
+        tag = "AI devrimi çözmüş (REJECT)"
+    elif is_stale(judge):
+        tag = "Eski problem (REJECT)"
+    else:
+        return verdict
+    if tag.split(" (", 1)[0] in verdict:
+        return verdict
+    return clip(f"{tag}. {verdict}".strip(), 1200)
 
 
 def _stamp_devtool_verdict(verdict: str, judge: dict, score: int) -> str:

@@ -324,7 +324,7 @@ class ScanService:
             )
             if view.opportunity_score >= required and not aha_ok:
                 logger.info(
-                    "Item %s Aha filter blocked Telegram: fewer than 2 pillars or an obvious idea",
+                    "Item %s Aha filter blocked Telegram: needs why_now plus another pillar, or it is obvious, stale, or already solved by AI",
                     view.item_id,
                 )
             if not passed:

@@ -104,6 +104,8 @@ class Opportunity(BaseModel):
     concept_key: str = ""
     aha_pillars: list[str] = Field(default_factory=list)
     obvious: bool = False
+    stale_problem: bool = False
+    ai_solved: bool = False
     market_scale: str = ""
     judge_verdict: str = ""
     market_dial: float | None = None
@@ -252,6 +254,8 @@ def opportunity_from_payload(payload: dict[str, Any]) -> Opportunity:
         concept_key=normalize_concept_key(payload.get("concept_key")),
         aha_pillars=_short_list(payload.get("aha_pillars"), 4, 40),
         obvious=_flag(payload.get("obvious")),
+        stale_problem=_flag(payload.get("stale_problem")),
+        ai_solved=_flag(payload.get("ai_solved")),
         market_scale=_market_scale(payload.get("market_scale")),
         judge_verdict=clip(str(payload.get("judge_verdict") or "").strip(), 1200),
         market_dial=_market_dial(payload.get("market_dial")),
