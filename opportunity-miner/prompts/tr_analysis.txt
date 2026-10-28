@@ -21,6 +21,8 @@ Kurallar:
 - competitor_weakness: mevcut çözümlerdeki ana kullanıcı şikayeti veya boşluk.
 - search_trend_signal: arama hacmi ve hype yönünün nitel değerlendirmesi. Kaynak desteklemiyorsa yüzde uydurma. Bilinmiyorsa "Sinyal belirsiz" yaz.
 - Aha! filtresi: bariz, sıkıcı veya jenerik fikirleri (genel PDF özetleyici, basit sosyal medya planlayıcı, standart lead-gen kazıyıcı, tipik AI müşteri hizmeti botu, herkesin hemen yazacağı birinci derece çözüm) zekice diye yazma.
+- Eski problem: son 6 ayda yeni bir kapı yoksa bunu fırsat diye yazma ve taslak puanı 50'nin altında bırak.
+- AI devrimi çözmüş iş: genel bir sohbet botu, Cursor veya Claude bu işi bu ürün olmadan bitiriyorsa (PDF sohbet, özet, metin yeniden yazma, toplantı notu, genel destek botu, sıradan görsel veya video sarmalayıcı) fırsat diye yazma ve puanı 50'nin altında bırak. Modeli kullanan bariz olmayan bir mekanik buna girmez.
 - aha_angle: çözümün neden bariz olmadığını 1 veya 2 cümleyle anlat. Barizse bunu açıkça söyle.
 - unfair_advantage: taklidi zorlaştıran hendek, büyüme kancası veya dağıtım numarası.
 - concept_key: mekanik ve problem için tek snake_case kimlik. Marka ve başlık yok. Kupe Cloud ile EasyKube ikisi de kubernetes_deployment_simplifier. AI Video Gen from PR ile RepoToVideo ikisi de github_pr_to_video_generator. PDF Chatbot ile AskPDF ikisi de pdf_document_qna_bot.

@@ -15,7 +15,8 @@ _BODY = (
     '{"title_tr":"Rapor","opportunity_score":71,'
     '"tr_market_analysis":"Yerel boşluk var.",'
     '"our_differentiator":"Sektöre özel akış.",'
-    '"business_model":"KOBİ aboneliği."}'
+    '"business_model":"KOBİ aboneliği.",'
+    '"aha_pillars":["cross_domain","why_now"]}'
 )
 
 
@@ -102,6 +103,9 @@ def test_default_model_is_gpt_4o_mini_and_parses_the_brief():
     assert "aha_angle" in system
     assert "unfair_advantage" in system
     assert "cross_domain" in system
+    assert "stale_problem" in system
+    assert "ai_solved" in system
+    assert "general chatbot already does" in system
     assert "exactly 2 plain Turkish sentences" in system
     assert "X yapmak isteyen kullanıcılara acı çektiriyor." in system
     assert "Gelişmiş arayüz ve kullanıcı dostu yapısıyla ayrışır." in system

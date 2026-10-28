@@ -59,6 +59,26 @@ class PipelineTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("TELEGRAM_BOT_TOKEN", text)
         self.assertIn("TELEGRAM_CHAT_ID is missing from the environment", text)
 
+    async def test_old_shape_without_why_now_is_not_sent(self) -> None:
+        dated = brief(score=86)
+        dated.aha_pillars = ["friction_hack", "viral"]
+        notifier = ScriptedNotifier()
+        service = ScanService(
+            self.settings(),
+            self.db,
+            fetchers=[StaticFetcher([sample_post()])],
+            classifier=ScriptedClassifier(gold_classification()),
+            analyzer=ScriptedAnalyzer(dated),
+            notifier=notifier,
+        )
+        with self.assertLogs("pipeline", level="INFO") as logs:
+            report = await service.run()
+        text = "\n".join(logs.output)
+        self.assertIn("Item 1 score: 86, required: 60 - SKIPPED", text)
+        self.assertIn("Aha filter blocked", text)
+        self.assertEqual(report.notified, 0)
+        self.assertEqual(notifier.sent, [])
+
     async def test_high_score_without_two_aha_pillars_is_not_sent(self) -> None:
         dull = brief(score=88)
         dull.aha_pillars = []
@@ -233,7 +253,7 @@ class PipelineTests(unittest.IsolatedAsyncioTestCase):
                     {
                         "opportunity_score": 82,
                         "judge_verdict": "Hâlâ boş.",
-                        "aha_pillars": ["friction_hack", "viral"],
+                        "aha_pillars": ["friction_hack", "why_now"],
                         "concept_key": "pdf_document_qna_bot",
                     }
                 )
@@ -242,7 +262,7 @@ class PipelineTests(unittest.IsolatedAsyncioTestCase):
                     "title_tr": "AskPDF",
                     "concept_key": "pdf_document_qna_bot",
                     "summary_tr": "PDF'te aranan cümle kayboluyor. Soru yazınca ilgili sayfayı açıyor.",
-                    "aha_pillars": ["friction_hack", "viral"],
+                    "aha_pillars": ["friction_hack", "why_now"],
                 }
             )
 

@@ -172,9 +172,12 @@ class UpgradeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(apply_judge_gates(92, {"devtool_class": "ai_infra"}), 49)
         self.assertEqual(apply_judge_gates(92, {"devtool_class": "ai_infra", **pillars}), 92)
         self.assertEqual(apply_judge_gates(99, {"devtool_class": "ai_infra", **pillars}), 95)
-        self.assertEqual(apply_judge_gates(90, {"aha_pillars": ["viral"]}), 79)
+        self.assertEqual(apply_judge_gates(90, {"aha_pillars": ["viral"]}), 49)
+        self.assertEqual(apply_judge_gates(90, {"aha_pillars": ["friction_hack", "viral"]}), 49)
         self.assertEqual(apply_judge_gates(90, pillars), 90)
         self.assertEqual(apply_judge_gates(90, {"obvious": True, **pillars}), 49)
+        self.assertEqual(apply_judge_gates(90, {"stale_problem": True, **pillars}), 49)
+        self.assertEqual(apply_judge_gates(90, {"ai_solved": True, **pillars}), 49)
         self.assertEqual(apply_judge_gates(90, {"devtool_class": "pre_ai"}), 49)
         from analysis.analyzer import merge_committee
 
@@ -184,6 +187,18 @@ class UpgradeTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(rejected.opportunity_score, 49)
         self.assertIn("Pre-AI obsolete tool", rejected.judge_verdict)
+        stale = merge_committee(
+            {"title_tr": "Eski hatırlatıcı"},
+            {"opportunity_score": 88, "stale_problem": True, "judge_verdict": "Yıllardır aynı araç.", **pillars},
+        )
+        self.assertEqual(stale.opportunity_score, 49)
+        self.assertIn("Eski problem", stale.judge_verdict)
+        solved = merge_committee(
+            {"title_tr": "PDF sohbet"},
+            {"opportunity_score": 88, "ai_solved": True, "judge_verdict": "Sohbet botu yapıyor.", **pillars},
+        )
+        self.assertEqual(solved.opportunity_score, 49)
+        self.assertIn("AI devrimi çözmüş", solved.judge_verdict)
         self.assertIn("REJECT", rejected.judge_verdict)
         passed = merge_committee(
             {"title_tr": "Token izleme"},
