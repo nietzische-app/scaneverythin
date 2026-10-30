@@ -290,6 +290,8 @@ class UpgradeTests(unittest.IsolatedAsyncioTestCase):
         buttons = mvp_keyboard(7)["inline_keyboard"][0]
         self.assertEqual(buttons[1]["text"], "🤖 Grok ile İncele")
         self.assertEqual(buttons[1]["callback_data"], "grok:7")
+        self.assertEqual(mvp_keyboard(7)["inline_keyboard"][1][0]["text"], "🚫 İlgilenmiyorum")
+        self.assertEqual(mvp_keyboard(7)["inline_keyboard"][1][0]["callback_data"], "nope:7")
 
     async def test_domain_check_uses_the_injected_resolver(self) -> None:
         def resolve(name: str) -> str:

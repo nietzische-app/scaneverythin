@@ -156,6 +156,7 @@ def _domain_line(analysis: dict, *, markdown: bool) -> str:
 
 
 _GROK_LABEL = "🤖 Grok ile İncele"
+_NOPE_LABEL = "🚫 İlgilenmiyorum"
 
 
 def mvp_keyboard(insight_id: int) -> dict:
@@ -165,7 +166,8 @@ def mvp_keyboard(insight_id: int) -> dict:
             [
                 {"text": _MVP_LABEL, "callback_data": f"mvp:{ident}"},
                 {"text": _GROK_LABEL, "callback_data": f"grok:{ident}"},
-            ]
+            ],
+            [{"text": _NOPE_LABEL, "callback_data": f"nope:{ident}"}],
         ]
     }
 
@@ -534,7 +536,7 @@ def callback_action(update: dict, chat_id: str) -> tuple[str, int] | None:
     if str(chat.get("id")) != str(chat_id).strip():
         return None
     kind, _, raw_id = str(query.get("data") or "").partition(":")
-    if kind not in {"mvp", "grok"}:
+    if kind not in {"mvp", "grok", "nope"}:
         return None
     try:
         return kind, int(raw_id)
@@ -563,6 +565,18 @@ async def handle_callback(settings: Settings, db, update: dict, client: httpx.As
         return False
     base = f"https://api.telegram.org/bot{token}"
     query_id = query.get("id")
+    if action is not None and action[0] == "nope":
+        found = await db.mark_not_interested(action[1])
+        if query_id:
+            toast = "Bu tür bir daha gösterilmeyecek" if found else "Bu fırsat artık kayıtlı değil."
+            try:
+                await client.post(
+                    f"{base}/answerCallbackQuery",
+                    json={"callback_query_id": query_id, "text": toast},
+                )
+            except httpx.HTTPError as exc:
+                logger.warning("telegram callback answer failed: %s", exc)
+        return found
     if query_id:
         try:
             await client.post(f"{base}/answerCallbackQuery", json={"callback_query_id": query_id})

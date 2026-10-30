@@ -79,6 +79,49 @@ class PipelineTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(report.notified, 0)
         self.assertEqual(notifier.sent, [])
 
+    async def test_not_interested_blocks_the_same_mechanic(self) -> None:
+        hidden = brief(title="Gümrük masası")
+        hidden.concept_key = "customs_declaration_desk"
+        other = brief(title="Fatura masası")
+        other.concept_key = "invoice_chase_desk"
+        await self.db.enqueue(sample_post())
+        await self.db.enqueue(
+            sample_post(external_id="202", url="https://news.ycombinator.com/item?id=202")
+        )
+        await self.db.enqueue(
+            sample_post(external_id="203", url="https://news.ycombinator.com/item?id=203")
+        )
+        items = await self.db.list_items(status="new", limit=10, oldest_first=True)
+        ids = []
+        for item, idea in zip(items, (hidden, hidden, other), strict=True):
+            ids.append(
+                await self.db.add_insight(
+                    item_id=item.id,
+                    confidence=90,
+                    opportunity_score=88,
+                    flags_json="{}",
+                    analysis_json=idea.model_dump_json(),
+                )
+            )
+            await self.db.update_item(item.id, status="analyzed")
+        await self.db.set_telegram_state(ids[0], 1)
+        await self.db.mark_not_interested(ids[0])
+        notifier = ScriptedNotifier()
+        service = ScanService(
+            self.settings(),
+            self.db,
+            fetchers=[StaticFetcher([])],
+            classifier=ScriptedClassifier(gold_classification()),
+            analyzer=ScriptedAnalyzer(brief()),
+            notifier=notifier,
+        )
+        with self.assertLogs("pipeline", level="INFO") as logs:
+            report = await service.run()
+        self.assertIn("SKIPPED - Not interested", "\n".join(logs.output))
+        self.assertEqual(report.notified, 1)
+        self.assertEqual(notifier.sent[0].analysis["concept_key"], "invoice_chase_desk")
+        self.assertEqual((await self.db.get_insight(ids[1])).telegram_sent, 2)
+
     async def test_old_shape_without_why_now_is_not_sent(self) -> None:
         dated = brief(score=86)
         dated.aha_pillars = ["friction_hack", "viral"]

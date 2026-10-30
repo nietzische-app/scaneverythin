@@ -149,6 +149,16 @@ JUDGE_PROMPT = (
 SYSTEM_PROMPT = SCOUT_PROMPT
 
 
+def dismissed_clause(titles: list[str]) -> str:
+    cleaned = [title.strip() for title in titles if title and title.strip()]
+    if not cleaned:
+        return ""
+    return (
+        "The user marked these as not interested: "
+        f"[{'; '.join(cleaned)}]. Ideas in that style stay strictly under 50."
+    )
+
+
 def favorite_clause(titles: list[str]) -> str:
     cleaned = [title.strip() for title in titles if title and title.strip()]
     if not cleaned:
@@ -171,6 +181,14 @@ class OpenAIUnavailable(RuntimeError):
 
 class DuplicateConcept(Exception):
     """This mechanic was already stored in the last 30 days. Do not call the Judge."""
+
+    def __init__(self, concept_key: str) -> None:
+        super().__init__(concept_key)
+        self.concept_key = concept_key
+
+
+class DismissedConcept(Exception):
+    """The user marked this mechanic as not interested. Do not call the Judge."""
 
     def __init__(self, concept_key: str) -> None:
         super().__init__(concept_key)
@@ -219,13 +237,22 @@ class OpenAIAnalyzer:
         user_prompt = render_prompt(template, post)
         clause = ""
         if self._db is not None and self._complete_override is None:
-            clause = favorite_clause(await self._db.liked_titles())
+            clause = "\n".join(
+                part
+                for part in (
+                    favorite_clause(await self._db.liked_titles()),
+                    dismissed_clause(await self._db.dismissed_titles()),
+                )
+                if part
+            )
 
         async def _run() -> Opportunity:
             scout_text = await self._complete(user_prompt, system=SCOUT_PROMPT)
             scout = parse_json_object(scout_text)
             scout_key = normalize_concept_key(scout.get("concept_key") if isinstance(scout, dict) else "")
             # shortcut: exact concept_key match, not a similarity search; a second brand name only collapses after the Judge rewrites it
+            if scout_key and await self._dismissed(scout_key):
+                raise DismissedConcept(scout_key)
             if scout_key and await self._concept_taken(scout_key):
                 raise DuplicateConcept(scout_key)
             try:
@@ -240,12 +267,18 @@ class OpenAIAnalyzer:
                 self._release_concept(scout_key)
                 raise
             final = opportunity.concept_key
+            if final and final != scout_key and await self._dismissed(final):
+                self._release_concept(scout_key)
+                raise DismissedConcept(final)
             if final and final != scout_key and await self._concept_taken(final):
                 self._release_concept(scout_key)
                 raise DuplicateConcept(final)
             return opportunity
 
         return await asyncio.wait_for(_run(), timeout=self.settings.analyzer_timeout_seconds)
+
+    async def _dismissed(self, key: str) -> bool:
+        return bool(key and self._db is not None and await self._db.concept_dismissed(key))
 
     async def _concept_taken(self, key: str) -> bool:
         async with self._concept_lock:

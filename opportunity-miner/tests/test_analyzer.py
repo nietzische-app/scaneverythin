@@ -40,6 +40,54 @@ class _Client:
         self.closed = True
 
 
+def test_dismissed_concept_does_not_call_the_judge():
+    import tempfile
+    from pathlib import Path
+
+    from database.db import Database
+    from analysis.analyzer import DismissedConcept
+    from tests.support import brief
+
+    async def run() -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            db = Database(str(Path(tmp) / "radar.sqlite"))
+            await db.connect()
+            await db.enqueue(sample_post())
+            item = (await db.list_items(status="new"))[0]
+            idea = brief(title="Gümrük masası")
+            idea.concept_key = "customs_declaration_desk"
+            insight_id = await db.add_insight(
+                item_id=item.id,
+                confidence=90,
+                opportunity_score=80,
+                flags_json="{}",
+                analysis_json=idea.model_dump_json(),
+            )
+            await db.mark_not_interested(insight_id)
+            calls: list[str] = []
+
+            def complete(user_prompt: str) -> str:
+                calls.append(user_prompt)
+                return (
+                    '{"concept_key":"customs_declaration_desk","title_tr":"X",'
+                    '"summary_tr":"a. b.","core_problem_or_mechanic":"c",'
+                    '"aha_pillars":["why_now","viral"],"current_problem":true}'
+                )
+
+            analyzer = OpenAIAnalyzer(Settings(), complete=complete, db=db)
+            try:
+                await analyzer.analyze(sample_post(external_id="202", url="https://news.ycombinator.com/item?id=202"))
+            except DismissedConcept as exc:
+                assert exc.concept_key == "customs_declaration_desk"
+            else:
+                raise AssertionError("dismissed concept reached the judge")
+            assert len(calls) == 1
+            assert "Scout brief" not in calls[0]
+            await db.close()
+
+    asyncio.run(run())
+
+
 def test_concept_key_strips_brand_punctuation():
     from database.models import normalize_concept_key
 
