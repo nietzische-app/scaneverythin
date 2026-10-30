@@ -36,6 +36,12 @@ _DEFAULT_GITHUB_TOPICS = [
 ]
 _DEFAULT_TREND_KEYWORDS = ["B2B software", "AI tools", "workflow automation"]
 _DEFAULT_X_QUERIES = ["#buildinpublic", "#saas", "mcp server", "ai agent SaaS"]
+_DEFAULT_FUNDING_FEEDS = [
+    "https://news.google.com/rss/search?q=%22series%20A%22%20OR%20%22seed%20round%22%20OR%20%22yat%C4%B1r%C4%B1m%20ald%C4%B1%22%20OR%20%22yat%C4%B1r%C4%B1m%20turu%22%20when%3A7d&hl=en-US&gl=US&ceid=US:en",
+    "https://webrazzi.com/feed/",
+    "https://www.eu-startups.com/feed/",
+    "https://techcrunch.com/category/venture/feed/",
+]
 
 
 def _env(name: str, default: str = "") -> str:
@@ -122,6 +128,8 @@ class Settings(BaseModel):
     trends_min_growth: int = 200
     x_bearer_token: str = ""
     x_direct_queries: list[str] = Field(default_factory=lambda: list(_DEFAULT_X_QUERIES))
+    funding_feeds: list[str] = Field(default_factory=lambda: list(_DEFAULT_FUNDING_FEEDS))
+    funding_item_limit: int = 8
 
     log_level: str = "INFO"
     host: str = "0.0.0.0"
@@ -244,6 +252,8 @@ def load_settings() -> Settings:
         trends_min_growth=_int("TRENDS_MIN_GROWTH", 200),
         x_bearer_token=_env("X_BEARER_TOKEN"),
         x_direct_queries=_csv("X_DIRECT_QUERIES", _DEFAULT_X_QUERIES),
+        funding_feeds=_csv("FUNDING_FEEDS", _DEFAULT_FUNDING_FEEDS),
+        funding_item_limit=_int("FUNDING_ITEM_LIMIT", 8),
         log_level=_env("LOG_LEVEL", "INFO"),
         host=_env("HOST", "0.0.0.0"),
         port=_int("PORT", 8000),

@@ -280,10 +280,28 @@ def _type_scale(analysis: dict, *, markdown: bool) -> str:
     return f"🏷️ Tip & Ölçek: {kind} | {scale}"
 
 
+def _funding_line(analysis: dict, *, markdown: bool) -> str:
+    company = str(analysis.get("funded_company") or "").strip()
+    if not company:
+        return ""
+    parts = [company]
+    rnd = str(analysis.get("funding_round") or "").strip()
+    amount = str(analysis.get("funding_amount") or "").strip()
+    if rnd:
+        parts.append(rnd)
+    if amount:
+        parts.append(amount)
+    text = " · ".join(parts)
+    if markdown:
+        return f"💸 *Yatırım:* {escape_md(text)}"
+    return f"💸 Yatırım: {text}"
+
+
 def format_alert(view: InsightView) -> str:
     analysis = view.analysis or {}
     title = analysis.get("title_tr") or view.title
     domain = _domain_line(analysis, markdown=True)
+    funding = _funding_line(analysis, markdown=True)
     lines = [
         f"🚀 *FIRSAT RADARI* \\| Skor: {int(view.opportunity_score)}/100",
         "━━━━━━━━━━━━━━━━━━━━",
@@ -291,6 +309,7 @@ def format_alert(view: InsightView) -> str:
         f"📌 *Proje / Fikir:* {escape_md(title)}",
         f"🔗 {md_link('Kaynak Bağlantısı', view.url)}",
         *([domain] if domain else []),
+        *([funding] if funding else []),
         "",
         "💡 *Özet & Problem:*",
         *_summary_blocks(analysis, markdown=True),
@@ -319,6 +338,7 @@ def plain_alert(view: InsightView) -> str:
     analysis = view.analysis or {}
     title = analysis.get("title_tr") or view.title
     domain = _domain_line(analysis, markdown=False)
+    funding = _funding_line(analysis, markdown=False)
     return "\n".join(
         [
             f"🚀 FIRSAT RADARI | Skor: {int(view.opportunity_score)}/100",
@@ -327,6 +347,7 @@ def plain_alert(view: InsightView) -> str:
             f"📌 Proje / Fikir: {title}",
             f"🔗 {view.url}",
             *([domain] if domain else []),
+            *([funding] if funding else []),
             "",
             "💡 Özet & Problem:",
             *_summary_blocks(analysis, markdown=False),

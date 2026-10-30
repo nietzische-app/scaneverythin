@@ -119,6 +119,14 @@ class UpgradeTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("🧠 Aha! / Zekice Yaklaşım: PR açılınca video çıkar.", card)
         self.assertIn("🛡️ Haksız Avantaj / Moat: GitHub olayı dağıtır.", card)
         self.assertIn(r"Aha\! / Zekice Yaklaşım", format_alert(view))
+        view.analysis["funded_company"] = "Acme Inc."
+        view.analysis["funding_round"] = "Series A"
+        view.analysis["funding_amount"] = "$12M"
+        self.assertIn("💸 Yatırım: Acme Inc. · Series A · $12M", plain_alert(view))
+        self.assertIn(r"💸 *Yatırım:* Acme Inc\. · Series A · $12M", format_alert(view))
+        view.analysis["funding_round"] = ""
+        self.assertIn("💸 Yatırım: Acme Inc. · $12M", plain_alert(view))
+        self.assertNotIn("Series A", plain_alert(view))
 
     async def test_competitor_columns_are_stored(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

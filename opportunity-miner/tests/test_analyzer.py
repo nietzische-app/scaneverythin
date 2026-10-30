@@ -118,6 +118,8 @@ def test_default_model_is_gpt_4o_mini_and_parses_the_brief():
     assert "kubernetes_deployment_simplifier" in system
     assert "github_pr_to_video_generator" in system
     assert "pdf_document_qna_bot" in system
+    assert "Signal: funding" in system
+    assert "Do not invent a clone" in system
     assert "strictly below 50" in system
     assert Settings(openai_model="gpt-4o").openai_model == "gpt-4o"
     assert Settings(openai_model="").openai_model == "gpt-4o-mini"

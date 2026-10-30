@@ -102,6 +102,9 @@ class Opportunity(BaseModel):
     aha_angle: str = ""
     unfair_advantage: str = ""
     concept_key: str = ""
+    funded_company: str = ""
+    funding_round: str = ""
+    funding_amount: str = ""
     aha_pillars: list[str] = Field(default_factory=list)
     obvious: bool = False
     stale_problem: bool = False
@@ -255,6 +258,9 @@ def opportunity_from_payload(payload: dict[str, Any]) -> Opportunity:
         aha_angle=clip(str(payload.get("aha_angle") or "").strip(), 500),
         unfair_advantage=clip(str(payload.get("unfair_advantage") or "").strip(), 400),
         concept_key=normalize_concept_key(payload.get("concept_key")),
+        funded_company=clip(str(payload.get("funded_company") or "").strip(), 120),
+        funding_round=clip(str(payload.get("funding_round") or "").strip(), 40),
+        funding_amount=clip(str(payload.get("funding_amount") or "").strip(), 40),
         aha_pillars=_short_list(payload.get("aha_pillars"), 4, 40),
         obvious=_flag(payload.get("obvious")),
         stale_problem=_flag(payload.get("stale_problem")),

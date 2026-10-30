@@ -31,7 +31,7 @@ ATOMIC_QUESTIONS: tuple[tuple[str, str], ...] = (
     ),
     (
         "has_signal",
-        "Does it express a real pain point, software/game request, or successful micro-SaaS launch?",
+        "Does it express a real pain point, software/game request, a successful product launch, or a named company announcing a funding round?",
     ),
     (
         "has_mechanism",
@@ -39,7 +39,7 @@ ATOMIC_QUESTIONS: tuple[tuple[str, str], ...] = (
     ),
     (
         "is_relevant",
-        "Is this relevant for micro-SaaS, B2B tool, or indie mobile game development?",
+        "Is this relevant for a large B2B or B2C product, micro-SaaS, or indie mobile game development?",
     ),
     (
         "should_forward",
@@ -87,6 +87,7 @@ def build_batched_prompt(post: RawPost) -> str:
     lines = [
         "You are a harsh noise filter for an opportunity radar.",
         "Politics, memes, generic news, hiring posts, and pure ads are NO.",
+        "A named company announcing a recent funding round is a signal: answer yes and forward it.",
         "Answer these 5 atomic yes/no questions about the post.",
         "Return one JSON object and nothing else.",
         "",
