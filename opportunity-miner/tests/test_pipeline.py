@@ -414,6 +414,54 @@ class PipelineTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(analyzer.calls, 0)
         self.assertEqual(service.classifier.calls, 1)
 
+    async def test_funding_is_classified_and_analyzed_ahead_of_the_backlog(self) -> None:
+        seen: list[str] = []
+
+        def classify(post):
+            seen.append(post.source)
+            return gold_classification()
+
+        for index in range(5):
+            await self.db.enqueue(
+                sample_post(external_id=str(index), url=f"https://news.ycombinator.com/item?id={index}")
+            )
+        for letter in ("a", "b", "c"):
+            await self.db.enqueue(
+                sample_post(
+                    source="funding",
+                    external_id=f"acme:series-{letter}",
+                    url=f"https://techcrunch.com/acme-{letter}",
+                    title=f"Acme {letter}",
+                )
+            )
+        service = ScanService(
+            self.settings(max_classifications_per_scan=4, max_analyses_per_scan=0, classifier_concurrency=1),
+            self.db,
+            fetchers=[StaticFetcher([])],
+            classifier=ScriptedClassifier(classify),
+            analyzer=ScriptedAnalyzer(brief(), available=False),
+            notifier=ScriptedNotifier(),
+        )
+        await service.run()
+        self.assertEqual(seen, ["funding", "funding", "funding", "hn"])
+
+        for row in await self.db.list_items(status="new", limit=20):
+            await self.db.update_item(row.id, status="pending_analysis")
+        analyze = ScanService(
+            self.settings(max_analyses_per_scan=5),
+            self.db,
+            fetchers=[StaticFetcher([])],
+            classifier=ScriptedClassifier(gold_classification()),
+            analyzer=ScriptedAnalyzer(brief()),
+            notifier=ScriptedNotifier(),
+        )
+        report = await analyze.run()
+        self.assertEqual(report.analyzed, 5)
+        analyzed = await self.db.list_items(status="analyzed", limit=20)
+        waiting = await self.db.list_items(status="pending_analysis", limit=20)
+        self.assertEqual(sum(item.source == "funding" for item in analyzed), 2)
+        self.assertEqual(sum(item.source == "funding" for item in waiting), 1)
+
     async def test_classification_budget_leaves_the_rest_queued(self) -> None:
         posts = [sample_post(external_id=str(index), url=f"https://news.ycombinator.com/item?id={index}") for index in range(3)]
         classifier = ScriptedClassifier(gold_classification())

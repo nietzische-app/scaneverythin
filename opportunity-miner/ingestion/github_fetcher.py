@@ -27,7 +27,7 @@ class GitHubFetcher(BaseFetcher):
     async def fetch(self) -> FetchBatch:
         topics = [topic.strip() for topic in self.settings.github_topics if topic.strip()]
         if not topics:
-            return FetchBatch(source=self.source, errors=["github: no topics configured"])
+            return FetchBatch(source=self.source)
         now = datetime.now(timezone.utc)
         day = (now - timedelta(days=max(1, self.settings.github_created_within_days))).date().isoformat()
         query = "(" + " OR ".join(f"topic:{topic}" for topic in topics) + f") created:>{day}"
