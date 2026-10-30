@@ -5,6 +5,7 @@ from __future__ import annotations
 import httpx
 
 from config import Settings
+from ingestion.funding_fetcher import FundingFetcher
 from ingestion.github_fetcher import GitHubFetcher
 from ingestion.hn_fetcher import HackerNewsFetcher
 from ingestion.producthunt_fetcher import ProductHuntFetcher
@@ -33,4 +34,5 @@ def build_fetchers(settings: Settings, client: httpx.AsyncClient) -> list:
         SaasPioneerFetcher(settings, client),
         TrendsFetcher(settings, client),
         XDirectFetcher(settings, client),
+        FundingFetcher(settings, client),
     ]

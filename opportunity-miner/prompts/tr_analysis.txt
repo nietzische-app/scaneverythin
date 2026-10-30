@@ -28,6 +28,7 @@ Kurallar:
 - aha_angle: çözümün neden bariz olmadığını 1 veya 2 cümleyle anlat. Barizse bunu açıkça söyle.
 - unfair_advantage: taklidi zorlaştıran hendek, büyüme kancası veya dağıtım numarası.
 - concept_key: mekanik ve problem için tek snake_case kimlik. Marka ve başlık yok. Kupe Cloud ile EasyKube ikisi de kubernetes_deployment_simplifier. AI Video Gen from PR ile RepoToVideo ikisi de github_pr_to_video_generator. PDF Chatbot ile AskPDF ikisi de pdf_document_qna_bot.
+- Signal: funding ise o şirketi yaz. funded_company, funding_round ve funding_amount gönderiden gelsin. Klon girişim uydurma. summary_tr o şirketi ve turun gösterdiği problemi anlatsın. Yatırım değilse üç alan boş.
 - summary_tr: tam 2 sade Türkçe cümle. 5 yaşındaki biri anlasın. DevOps veya bilgisayar bilimi bilgisi isteme.
 - jargon_analogy: fikir Kubernetes, RAG, vektör veritabanı, MCP veya CI/CD kullanıyorsa tek satır somut benzetme yaz. Örnek: Kubernetes = Binlerce sunucuyu otomatik yöneten dijital kargo limanı müdürü. Jargon yoksa boş string.
 - net_problem: kim, nerede, hangi somut eziyeti çekiyor veya kaç para kaybediyor. Formül yasak: "X yapmak isteyen kullanıcılara acı çektiriyor."
@@ -38,6 +39,9 @@ Kurallar:
 
 {
   "concept_key": "kubernetes_deployment_simplifier",
+  "funded_company": "",
+  "funding_round": "",
+  "funding_amount": "",
   "title_tr": "kısa fırsat adı",
   "summary_tr": "tam 2 sade cümle",
   "jargon_analogy": "jargon varsa tek satır benzetme, yoksa boş",

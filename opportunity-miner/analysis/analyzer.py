@@ -76,7 +76,12 @@ SCOUT_PROMPT = (
     "Give the high draft score only to a large current business: many paying customers, money movement, a regulated workflow, or a multi-sided market. "
     "project_scale: Büyük Çaplı B2B Platformu or Büyük Operasyon. A one-day tool is not a candidate. "
     "suggested_domains: exactly 2 short catchy domains, each a single hostname such as slug.io, slug.app, or slug.com. "
-    "Leave the final gate to the Judge. A draft opportunity_score is allowed, and the Judge may replace it."
+    "Leave the final gate to the Judge. A draft opportunity_score is allowed, and the Judge may replace it. "
+    "If the post body says Signal: funding, describe that company: who raised, the round, and the amount. "
+    "Set funded_company, funding_round, and funding_amount from the post. Do not invent a clone. "
+    "summary_tr stays two plain sentences about that company and the problem the round evidences. "
+    "A recent round can make the pain current unless the company is a developer tool or a one-day utility. "
+    "When the post is not a funding announcement, leave those three fields empty."
 )
 
 JUDGE_PROMPT = (
@@ -121,6 +126,9 @@ JUDGE_PROMPT = (
     "Examples: PDF chat, summarizers, text rewriters, meeting notes, generic customer-service bots, basic image or video wrappers, and developer tools. "
     "Passing requires current_problem true, developer_problem false, small_tool false, why_now, and one other pillar. "
     "Otherwise set opportunity_score strictly below 50. Do not leave it at 79. "
+    "If funded_company is set, keep that company, round, and amount. Do not invent a clone. "
+    "A recent round can set current_problem true unless the company is a developer tool or a one-day utility. "
+    "A recent round does not excuse a developer tool or a one-day utility. "
     "If the Scout left aha_angle or unfair_advantage empty, fill them in Turkish. Do not invent a clever angle for an obvious idea. "
     "concept_key: the mechanic id in lowercase snake_case, with no brand or product title. "
     "If the Scout key names a product instead of the mechanic, replace it. "
@@ -133,7 +141,8 @@ JUDGE_PROMPT = (
     "Return JSON with opportunity_score, judge_verdict, saturated_wrapper, open_source_alternative, "
     "mrr_likely, devtool_class, top_competitors, competitor_weakness, search_trend_signal, "
     "obvious, stale_problem, ai_solved, developer_problem, current_problem, small_tool, "
-    "aha_pillars, aha_angle, unfair_advantage, and concept_key."
+    "aha_pillars, aha_angle, unfair_advantage, concept_key, "
+    "funded_company, funding_round, and funding_amount."
 )
 
 # Scout owns the brief the rest of the app already reads. The Judge owns the score.
@@ -338,6 +347,9 @@ def merge_committee(scout: dict, judge: dict) -> Opportunity:
         "search_trend_signal",
         "aha_angle",
         "unfair_advantage",
+        "funded_company",
+        "funding_round",
+        "funding_amount",
     ):
         if _blank(payload.get(key)) and not _blank(judge.get(key)):
             payload[key] = judge.get(key)

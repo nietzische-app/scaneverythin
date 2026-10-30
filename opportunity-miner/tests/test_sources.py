@@ -13,6 +13,7 @@ from tests.support import ROOT  # noqa: F401
 
 from config import Settings
 from ingestion import build_fetchers
+from ingestion.funding_fetcher import FundingFetcher, collapse_funding, extract_funding, funding_post
 from ingestion.github_fetcher import GitHubFetcher, select_repos
 from ingestion.saas_pioneer_fetcher import (
     annotate_listing,
@@ -178,7 +179,7 @@ class SourceTests(unittest.IsolatedAsyncioTestCase):
             sources = [fetcher.source for fetcher in build_fetchers(Settings(), client)]
         self.assertEqual(
             sources,
-            ["hn", "reddit", "producthunt", "x", "github", "saas", "trends", "x-direct"],
+            ["hn", "reddit", "producthunt", "x", "github", "saas", "trends", "x-direct", "funding"],
         )
 
         fresh = (datetime.now(timezone.utc) - timedelta(days=5)).strftime("%Y-%m-%dT00:00:00Z")
@@ -273,6 +274,112 @@ class SourceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(direct.posts[0].external_id, "55")
         self.assertEqual(missing.posts, [])
         self.assertIn("X_BEARER_TOKEN is missing", missing.errors[0])
+
+    def test_funding_headline_keeps_company_round_and_amount(self) -> None:
+        parsed = extract_funding(
+            "Acme raises $12M Series A",
+            "Acme helps customs brokers file declarations.",
+        )
+        self.assertEqual(parsed, ("Acme", "Series A", "$12M"))
+        self.assertIsNone(extract_funding("How to write a deck", "Tips for founders."))
+        self.assertIsNone(extract_funding("How founders closed their seed round", ""))
+        turkish = extract_funding("Getir, Seri A turunda 50 milyon dolar yatırım aldı", "")
+        self.assertEqual(turkish, ("Getir", "Seri A", "50 milyon"))
+        post = funding_post(
+            RawPost(
+                source="rss",
+                external_id="guid-1",
+                url="https://techcrunch.com/2026/10/30/acme",
+                title="Exclusive: Acme raises $12M Series A - TechCrunch",
+                body="Acme helps customs brokers file declarations.",
+            )
+        )
+        assert post is not None
+        self.assertEqual(post.source, "funding")
+        self.assertEqual(post.external_id, "acme:series-a")
+        self.assertEqual(post.author, "techcrunch")
+        self.assertIn("Signal: funding", post.body)
+        self.assertIn("Company: Acme", post.body)
+        self.assertIn("Round: Series A", post.body)
+        self.assertIn("Amount: $12M", post.body)
+        self.assertIn("What: Acme helps customs brokers file declarations.", post.body)
+
+    def test_same_round_collapses_and_prefers_the_outlet_url(self) -> None:
+        google = funding_post(
+            RawPost(
+                source="rss",
+                external_id="g",
+                url="https://news.google.com/rss/articles/acme",
+                title="Acme raises $12M Series A - TechCrunch",
+                body="Same round.",
+            )
+        )
+        outlet = funding_post(
+            RawPost(
+                source="rss",
+                external_id="t",
+                url="https://techcrunch.com/2026/10/30/acme",
+                title="Acme raises $12 million Series A",
+                body="Same round from the outlet.",
+            )
+        )
+        assert google is not None and outlet is not None
+        self.assertEqual(google.external_id, outlet.external_id)
+        self.assertEqual(google.content_hash, outlet.content_hash)
+        kept = collapse_funding([google, outlet])
+        self.assertEqual(len(kept), 1)
+        self.assertEqual(kept[0].url, "https://techcrunch.com/2026/10/30/acme")
+        series_b = funding_post(
+            RawPost(
+                source="rss",
+                external_id="b",
+                url="https://techcrunch.com/2026/10/30/acme-b",
+                title="Acme raises $40M Series B",
+                body="Later round.",
+            )
+        )
+        assert series_b is not None
+        self.assertEqual(len(collapse_funding([google, series_b])), 2)
+
+    async def test_a_dead_funding_feed_does_not_drop_the_others(self) -> None:
+        feed = """<?xml version="1.0"?>
+        <rss><channel>
+          <item>
+            <title>Acme raises $12M Series A</title>
+            <link>https://www.eu-startups.com/2026/10/acme</link>
+            <description>Acme files customs declarations for brokers.</description>
+          </item>
+          <item>
+            <title>How to write a deck</title>
+            <link>https://www.eu-startups.com/2026/10/deck</link>
+            <description>Tips for founders raising a round.</description>
+          </item>
+        </channel></rss>"""
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            if request.url.host == "www.eu-startups.com":
+                return httpx.Response(200, text=feed)
+            return httpx.Response(404, text="down")
+
+        settings = Settings(
+            funding_feeds=[
+                "https://webrazzi.com/feed/",
+                "https://www.eu-startups.com/feed/",
+            ],
+            funding_item_limit=8,
+        )
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            batch = await FundingFetcher(settings, client).fetch()
+        self.assertEqual(len(batch.posts), 1)
+        self.assertEqual(batch.posts[0].author, "eu-startups")
+        self.assertEqual(batch.posts[0].external_id, "acme:series-a")
+        self.assertTrue(batch.errors)
+        self.assertIn("webrazzi", batch.errors[0])
+        hosts = [item.split("/")[2] for item in Settings().funding_feeds]
+        self.assertEqual(
+            hosts,
+            ["news.google.com", "webrazzi.com", "www.eu-startups.com", "techcrunch.com"],
+        )
 
 
 if __name__ == "__main__":
