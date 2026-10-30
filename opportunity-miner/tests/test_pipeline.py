@@ -59,6 +59,26 @@ class PipelineTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("TELEGRAM_BOT_TOKEN", text)
         self.assertIn("TELEGRAM_CHAT_ID is missing from the environment", text)
 
+    async def test_developer_problem_is_not_sent(self) -> None:
+        tool = brief(score=91)
+        tool.developer_problem = True
+        notifier = ScriptedNotifier()
+        service = ScanService(
+            self.settings(),
+            self.db,
+            fetchers=[StaticFetcher([sample_post()])],
+            classifier=ScriptedClassifier(gold_classification()),
+            analyzer=ScriptedAnalyzer(tool),
+            notifier=notifier,
+        )
+        with self.assertLogs("pipeline", level="INFO") as logs:
+            report = await service.run()
+        text = "\n".join(logs.output)
+        self.assertIn("Item 1 score: 91, required: 60 - SKIPPED", text)
+        self.assertIn("Aha filter blocked", text)
+        self.assertEqual(report.notified, 0)
+        self.assertEqual(notifier.sent, [])
+
     async def test_old_shape_without_why_now_is_not_sent(self) -> None:
         dated = brief(score=86)
         dated.aha_pillars = ["friction_hack", "viral"]
@@ -174,8 +194,9 @@ class PipelineTests(unittest.IsolatedAsyncioTestCase):
         scout = json.dumps(
             {
                 "title_tr": "Kupe Cloud",
-                "concept_key": "kubernetes_deployment_simplifier",
-                "summary_tr": "Şirket YAML ile boğuşuyor. Araç bunu tek tıkla kuruyor.",
+                "concept_key": "customs_declaration_desk",
+                "summary_tr": "Müşavir her beyannameyi elle eşliyor. Masa bunu tek oturuşta kapatıyor.",
+                "current_problem": True,
                 "aha_pillars": ["friction_hack", "why_now"],
             }
         )
@@ -185,7 +206,8 @@ class PipelineTests(unittest.IsolatedAsyncioTestCase):
                 "judge_verdict": "Cluster başı ücret öderler.",
                 "aha_pillars": ["friction_hack", "why_now"],
                 "obvious": False,
-                "concept_key": "kubernetes_deployment_simplifier",
+                "current_problem": True,
+                "concept_key": "customs_declaration_desk",
             }
         )
         calls = {"scout": 0, "judge": 0}
@@ -224,7 +246,7 @@ class PipelineTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(notifier.sent), 1)
         async with self.db.conn.execute("SELECT concept_key FROM insights") as cursor:
             row = await cursor.fetchone()
-        self.assertEqual(row["concept_key"], "kubernetes_deployment_simplifier")
+        self.assertEqual(row["concept_key"], "customs_declaration_desk")
 
     async def test_concept_older_than_30_days_is_not_a_duplicate(self) -> None:
         await self.db.enqueue(sample_post(external_id="old", url="https://news.ycombinator.com/item?id=9"))
@@ -254,6 +276,7 @@ class PipelineTests(unittest.IsolatedAsyncioTestCase):
                         "opportunity_score": 82,
                         "judge_verdict": "Hâlâ boş.",
                         "aha_pillars": ["friction_hack", "why_now"],
+                        "current_problem": True,
                         "concept_key": "pdf_document_qna_bot",
                     }
                 )
