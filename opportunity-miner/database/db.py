@@ -202,19 +202,36 @@ class Database:
         async with self.conn.execute(sql, args) as cursor:
             return await cursor.fetchone() is not None
 
-    async def list_queue(self, statuses: list[str], limit: int, *, oldest_first: bool = True) -> list[ItemRecord]:
+    async def list_queue(
+        self,
+        statuses: list[str],
+        limit: int,
+        *,
+        oldest_first: bool = True,
+        source: str | None = None,
+        exclude_source: str | None = None,
+    ) -> list[ItemRecord]:
         if limit <= 0 or not statuses:
             return []
         placeholders = ", ".join("?" for _ in statuses)
         direction = "ASC" if oldest_first else "DESC"
+        where = f"status IN ({placeholders})"
+        args: list[Any] = list(statuses)
+        if source:
+            where += " AND source = ?"
+            args.append(source)
+        if exclude_source:
+            where += " AND source != ?"
+            args.append(exclude_source)
+        args.append(limit)
         sql = f"""
             SELECT {", ".join(_ITEM_COLUMNS)}
             FROM scanned_items
-            WHERE status IN ({placeholders})
+            WHERE {where}
             ORDER BY created_at {direction}, id {direction}
             LIMIT ?
         """
-        async with self.conn.execute(sql, (*statuses, limit)) as cursor:
+        async with self.conn.execute(sql, args) as cursor:
             rows = await cursor.fetchall()
         return [_item(row) for row in rows]
 

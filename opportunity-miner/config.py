@@ -27,13 +27,7 @@ _DEFAULT_NITTER = [
     "https://nitter.space",
     "https://xcancel.com",
 ]
-_DEFAULT_GITHUB_TOPICS = [
-    "mcp-server",
-    "ai-agent",
-    "llm-infra",
-    "workflow-automation",
-    "guardrails",
-]
+_DEFAULT_GITHUB_TOPICS: list[str] = []
 _DEFAULT_TREND_KEYWORDS = ["B2B software", "AI tools", "workflow automation"]
 _DEFAULT_X_QUERIES = ["#buildinpublic", "#saas", "mcp server", "ai agent SaaS"]
 _DEFAULT_FUNDING_FEEDS = [

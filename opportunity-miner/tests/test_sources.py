@@ -103,7 +103,7 @@ class SourceTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("MCP server that chases invoices", posts[0].body)
         self.assertIn("/day", posts[0].body)
         self.assertEqual(posts[0].author, "ada")
-        self.assertIn("mcp-server", Settings().github_topics)
+        self.assertEqual(Settings().github_topics, [])
 
     def test_listing_fields_and_flippa_cards(self) -> None:
         urls = newest_startup_urls(SITEMAP, 1)
@@ -177,6 +177,9 @@ class SourceTests(unittest.IsolatedAsyncioTestCase):
     async def test_fetchers_are_wired_and_read_fixtures(self) -> None:
         async with httpx.AsyncClient() as client:
             sources = [fetcher.source for fetcher in build_fetchers(Settings(), client)]
+            quiet = await GitHubFetcher(Settings(), client).fetch()
+        self.assertEqual(quiet.posts, [])
+        self.assertEqual(quiet.errors, [])
         self.assertEqual(
             sources,
             ["hn", "reddit", "producthunt", "x", "github", "saas", "trends", "x-direct", "funding"],

@@ -31,6 +31,8 @@ logger = logging.getLogger(__name__)
 
 MAX_ATTEMPTS = 3
 _CLASSIFY_STATUSES = ["new", "pending_classification"]
+# Two of the analysis budget stay available for raises. Leftover slots go back to the old queue.
+_FUNDING_ANALYSIS_RESERVE = 2
 
 
 class SupportsClassify(Protocol):
@@ -107,8 +109,8 @@ class ScanService:
         self._seen_keys = set()
         try:
             await self._fetch(report)
-            await self._analyze_pending(report)
             await self._classify_pending(report)
+            await self._analyze_pending(report)
             await self._notify(report)
             report.finished_at = utcnow_iso()
             await self.db.finish_run(run_id, "ok", report)
@@ -185,10 +187,10 @@ class ScanService:
             await self._note(report, "openai_not_configured")
             await self._inc(report, "deferred", waiting)
             return
-        rows = await self.db.list_queue(
+        rows = await self._queue_with_funding_first(
             ["pending_analysis"],
             self.settings.max_analyses_per_scan,
-            oldest_first=True,
+            _FUNDING_ANALYSIS_RESERVE,
         )
         await self._inc(report, "deferred", max(0, waiting - len(rows)))
         for row in rows:
@@ -207,10 +209,10 @@ class ScanService:
             await self._note(report, "gemini_not_configured")
             await self._inc(report, "deferred", waiting)
             return
-        rows = await self.db.list_queue(
+        rows = await self._queue_with_funding_first(
             _CLASSIFY_STATUSES,
             self.settings.max_classifications_per_scan,
-            oldest_first=True,
+            self.settings.funding_item_limit,
         )
         await self._inc(report, "deferred", max(0, waiting - len(rows)))
         semaphore = asyncio.Semaphore(self.settings.classifier_concurrency)
@@ -249,15 +251,6 @@ class ScanService:
             note=None,
             classification_json=payload,
         )
-        if not self.analyzer.available:
-            await self._note(report, "openai_not_configured")
-            await self._inc(report, "deferred")
-            return
-        if not await self._take_analysis_slot():
-            await self._inc(report, "deferred")
-            return
-        refreshed = row.model_copy(update={"note": None, "classification_json": payload})
-        await self._analyze_one(refreshed, report)
 
     async def _analyze_one(self, row: ItemRecord, report: ScanReport) -> None:
         post = row.to_raw_post()
@@ -349,6 +342,24 @@ class ScanService:
         status = "error" if attempt_count(note) >= MAX_ATTEMPTS else retry_status
         await self.db.update_item(row.id, status=status, note=note)
         await self._item_error(report, f"{row.source}:{row.external_id}: {message}")
+
+    async def _queue_with_funding_first(
+        self,
+        statuses: list[str],
+        limit: int,
+        funding_first: int,
+    ) -> list[ItemRecord]:
+        """Funding fills the reserved slots, then the older queue, then any room left."""
+        if limit <= 0:
+            return []
+        funding = await self.db.list_queue(statuses, limit, source="funding")
+        others = await self.db.list_queue(statuses, limit, exclude_source="funding")
+        reserved = funding[: max(0, funding_first)]
+        room = limit - len(reserved)
+        general = others[:room]
+        room -= len(general)
+        extra = funding[len(reserved) : len(reserved) + room]
+        return reserved + general + extra
 
     async def _take_analysis_slot(self) -> bool:
         async with self._slot_lock:
