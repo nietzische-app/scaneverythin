@@ -167,11 +167,16 @@ class UpgradeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(apply_judge_gates(90, {"saturated_wrapper": True}), 49)
         self.assertEqual(apply_judge_gates(70, {"devtool_class": "enterprise"}), 49)
         self.assertEqual(apply_judge_gates(85, {"devtool_class": "enterprise"}), 49)
-        pillars = {"aha_pillars": ["cross_domain", "why_now"]}
+        pillars = {"aha_pillars": ["cross_domain", "why_now"], "current_problem": True}
         self.assertEqual(apply_judge_gates(85, {"devtool_class": "enterprise", **pillars}), 85)
         self.assertEqual(apply_judge_gates(92, {"devtool_class": "ai_infra"}), 49)
-        self.assertEqual(apply_judge_gates(92, {"devtool_class": "ai_infra", **pillars}), 92)
-        self.assertEqual(apply_judge_gates(99, {"devtool_class": "ai_infra", **pillars}), 95)
+        self.assertEqual(apply_judge_gates(92, {"devtool_class": "ai_infra", **pillars}), 49)
+        self.assertEqual(apply_judge_gates(99, {"devtool_class": "ai_infra", **pillars}), 49)
+        self.assertEqual(apply_judge_gates(90, {"small_tool": True, **pillars}), 49)
+        self.assertEqual(
+            apply_judge_gates(90, {"concept_key": "kubernetes_deployment_simplifier", **pillars}),
+            49,
+        )
         self.assertEqual(apply_judge_gates(90, {"aha_pillars": ["viral"]}), 49)
         self.assertEqual(apply_judge_gates(90, {"aha_pillars": ["friction_hack", "viral"]}), 49)
         self.assertEqual(apply_judge_gates(90, pillars), 90)
@@ -207,13 +212,14 @@ class UpgradeTests(unittest.IsolatedAsyncioTestCase):
                 "devtool_class": "ai_infra",
                 "judge_verdict": "Halüsinasyon ve maliyet izler.",
                 "aha_pillars": ["cross_domain", "Why Now"],
+                "current_problem": True,
                 "aha_angle": "PR açılınca video kendiliğinden çıkar.",
                 "unfair_advantage": "GitHub olayı dağıtımı başlatır.",
             },
         )
-        self.assertEqual(passed.opportunity_score, 91)
-        self.assertIn("High-Value AI Ecosystem Infrastructure", passed.judge_verdict)
-        self.assertIn("PASS", passed.judge_verdict)
+        self.assertEqual(passed.opportunity_score, 49)
+        self.assertIn("Geliştirici problemi", passed.judge_verdict)
+        self.assertIn("REJECT", passed.judge_verdict)
         self.assertEqual(passed.aha_angle, "PR açılınca video kendiliğinden çıkar.")
         self.assertEqual(passed.unfair_advantage, "GitHub olayı dağıtımı başlatır.")
         self.assertEqual(passed.aha_pillars, ["cross_domain", "Why Now"])

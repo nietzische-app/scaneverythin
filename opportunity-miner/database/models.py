@@ -106,6 +106,9 @@ class Opportunity(BaseModel):
     obvious: bool = False
     stale_problem: bool = False
     ai_solved: bool = False
+    developer_problem: bool = False
+    current_problem: bool = False
+    small_tool: bool = False
     market_scale: str = ""
     judge_verdict: str = ""
     market_dial: float | None = None
@@ -256,6 +259,9 @@ def opportunity_from_payload(payload: dict[str, Any]) -> Opportunity:
         obvious=_flag(payload.get("obvious")),
         stale_problem=_flag(payload.get("stale_problem")),
         ai_solved=_flag(payload.get("ai_solved")),
+        developer_problem=_flag(payload.get("developer_problem")),
+        current_problem=_flag(payload.get("current_problem")),
+        small_tool=_flag(payload.get("small_tool")),
         market_scale=_market_scale(payload.get("market_scale")),
         judge_verdict=clip(str(payload.get("judge_verdict") or "").strip(), 1200),
         market_dial=_market_dial(payload.get("market_dial")),

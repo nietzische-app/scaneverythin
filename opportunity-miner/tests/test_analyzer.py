@@ -16,7 +16,7 @@ _BODY = (
     '"tr_market_analysis":"Yerel boşluk var.",'
     '"our_differentiator":"Sektöre özel akış.",'
     '"business_model":"KOBİ aboneliği.",'
-    '"aha_pillars":["cross_domain","why_now"]}'
+    '"aha_pillars":["cross_domain","why_now"],"current_problem":true}'
 )
 
 
@@ -92,7 +92,9 @@ def test_default_model_is_gpt_4o_mini_and_parses_the_brief():
     assert "TR Pazar Fırsatı" in system
     assert "minor micro-tools" in system
     assert "Pre-AI obsolete tool" in system
-    assert "High-Value AI Ecosystem Infrastructure" in system
+    assert "Geliştirici problemi" in system
+    assert "current_problem" in system
+    assert "small_tool" in system
     assert "MCP" in system
     assert "project_scale" in system
     assert "top_competitors" in system
