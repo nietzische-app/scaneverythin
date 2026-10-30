@@ -466,6 +466,38 @@ class UpgradeTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(any(path.endswith("sendPhoto") for path in calls))
         self.assertEqual(bodies[-1]["reply_markup"]["inline_keyboard"][0][0]["callback_data"], "mvp:7")
 
+    async def test_a_short_photo_is_not_followed_by_the_same_card(self) -> None:
+        calls: list[str] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            calls.append(request.url.path)
+            return httpx.Response(200, json={"ok": True, "result": {"message_id": 5}})
+
+        settings = Settings(telegram_bot_token="123:abc", telegram_chat_id="99")
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            notifier = TelegramNotifier(settings, client=client)
+            sent = await notifier.send(_view(score=88))
+        self.assertEqual(sent, 5)
+        self.assertEqual([path for path in calls if path.endswith("sendMessage")], [])
+        self.assertTrue(calls[0].endswith("sendPhoto"))
+
+    async def test_a_long_card_is_one_text_message(self) -> None:
+        calls: list[str] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            calls.append(request.url.path)
+            return httpx.Response(200, json={"ok": True, "result": {"message_id": 4}})
+
+        view = _view(score=90)
+        view.analysis["judge_verdict"] = "kelime " * 400
+        settings = Settings(telegram_bot_token="123:abc", telegram_chat_id="99")
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            notifier = TelegramNotifier(settings, client=client)
+            sent = await notifier.send(view)
+        self.assertEqual(sent, 4)
+        self.assertEqual(calls, [calls[0]])
+        self.assertTrue(calls[0].endswith("sendMessage"))
+
     async def test_domain_lookup_failure_still_sends_the_card(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             db = Database(str(Path(tmp) / "radar.sqlite"))

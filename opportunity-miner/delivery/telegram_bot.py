@@ -376,7 +376,7 @@ class TelegramNotifier:
             client = httpx.AsyncClient(timeout=self.settings.request_timeout_seconds)
             close_after = True
         try:
-            if int(view.opportunity_score) >= 80:
+            if int(view.opportunity_score) >= 80 and len(plain_alert(view)) <= 1024:
                 photo = await self._card_png(view)
                 if photo:
                     sent = await self._post_photo(client, token, view, photo)
@@ -442,11 +442,7 @@ class TelegramNotifier:
                 logger.warning("telegram photo request failed: %s", exc)
                 return 0
             if response.status_code == 200:
-                message_id = _message_id(response)
-                if len(plain_alert(view)) > 1024:
-                    text_url = _API.format(token=token, method="sendMessage")
-                    await self._send_card_text(client, text_url, view, None)
-                return message_id
+                return _message_id(response)
             logger.warning("telegram photo status %s: %s", response.status_code, response.text[:300])
         return 0
 
