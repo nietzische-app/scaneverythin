@@ -2,16 +2,19 @@
 
 from __future__ import annotations
 
+import json
 import tempfile
 import unittest
 from pathlib import Path
 
 from tests.support import brief, sample_post
 
-from analysis.analyzer import favorite_clause
+import httpx
+
+from analysis.analyzer import dismissed_clause, favorite_clause
 from config import Settings
 from database.db import Database
-from delivery.telegram_bot import apply_reaction, liked_message_id
+from delivery.telegram_bot import apply_reaction, handle_callback, liked_message_id
 
 
 def _reaction(chat_id: int, message_id: int, emoji: str) -> dict:
@@ -91,4 +94,51 @@ class ReactionTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn("aha_angle", names)
             self.assertIn("unfair_advantage", names)
             self.assertIn("concept_key", names)
+            self.assertIn("not_interested", names)
+            await db.close()
+
+    async def test_not_interested_hides_the_mechanic_until_a_heart(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            db = Database(str(Path(tmp) / "radar.sqlite"))
+            await db.connect()
+            await db.enqueue(sample_post())
+            item = (await db.list_items(status="new"))[0]
+            idea = brief(title="Gümrük masası")
+            idea.concept_key = "customs_declaration_desk"
+            insight_id = await db.add_insight(
+                item_id=item.id,
+                confidence=90,
+                opportunity_score=80,
+                flags_json="{}",
+                analysis_json=idea.model_dump_json(),
+            )
+            await db.set_telegram_message(insight_id, 42)
+            await apply_reaction(db, Settings(telegram_chat_id="99"), _reaction(99, 42, "❤️"))
+            seen: list[dict] = []
+
+            def handler(request: httpx.Request) -> httpx.Response:
+                seen.append(json.loads(request.content.decode()))
+                return httpx.Response(200, json={"ok": True, "result": {}})
+
+            update = {
+                "callback_query": {
+                    "id": "q1",
+                    "data": f"nope:{insight_id}",
+                    "message": {"chat": {"id": 99}},
+                }
+            }
+            settings = Settings(telegram_bot_token="123:abc", telegram_chat_id="99")
+            async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+                ok = await handle_callback(settings, db, update, client)
+            self.assertTrue(ok)
+            self.assertEqual(seen, [{"callback_query_id": "q1", "text": "Bu tür bir daha gösterilmeyecek"}])
+            self.assertTrue(await db.concept_dismissed("customs_declaration_desk"))
+            self.assertEqual(await db.liked_titles(), [])
+            self.assertEqual(await db.dismissed_titles(), ["Gümrük masası"])
+            self.assertIn("Gümrük masası", dismissed_clause(await db.dismissed_titles()))
+            self.assertIn("not interested", dismissed_clause(["Gümrük masası"]))
+            liked = await apply_reaction(db, settings, _reaction(99, 42, "❤️"))
+            self.assertTrue(liked)
+            self.assertFalse(await db.concept_dismissed("customs_declaration_desk"))
+            self.assertEqual(await db.liked_titles(), ["Gümrük masası"])
             await db.close()

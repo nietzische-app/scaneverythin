@@ -51,6 +51,7 @@ CREATE TABLE IF NOT EXISTS insights (
     analysis_json TEXT NOT NULL,
     telegram_sent INTEGER NOT NULL DEFAULT 0,
     user_liked INTEGER NOT NULL DEFAULT 0,
+    not_interested INTEGER NOT NULL DEFAULT 0,
     telegram_message_id INTEGER,
     judge_verdict TEXT NOT NULL DEFAULT '',
     market_dial REAL,
@@ -366,6 +367,7 @@ class Database:
         """Liked rows, or any row scored above 75, inside the window. Highest score first."""
         sql = _INSIGHT_SELECT + """
             WHERE (i.user_liked = 1 OR i.opportunity_score > 75)
+              AND i.not_interested = 0
               AND i.created_at >= ?
             ORDER BY i.opportunity_score DESC, i.user_liked DESC, i.created_at DESC
             LIMIT ?
@@ -415,11 +417,33 @@ class Database:
 
     async def mark_liked(self, message_id: int) -> bool:
         cursor = await self.conn.execute(
-            "UPDATE insights SET user_liked = 1 WHERE telegram_message_id = ?",
+            "UPDATE insights SET user_liked = 1, not_interested = 0 WHERE telegram_message_id = ?",
             (message_id,),
         )
         await self.conn.commit()
         return cursor.rowcount > 0
+
+    async def mark_not_interested(self, insight_id: int) -> bool:
+        cursor = await self.conn.execute(
+            "UPDATE insights SET not_interested = 1, user_liked = 0 WHERE id = ?",
+            (insight_id,),
+        )
+        await self.conn.commit()
+        return cursor.rowcount > 0
+
+    async def concept_dismissed(self, concept_key: str) -> bool:
+        """True when this mechanic was marked İlgilenmiyorum.
+
+        shortcut: exact concept_key text only, not a style match; upgrade when a reworded cousin still gets through
+        """
+        key = normalize_concept_key(concept_key)
+        if not key:
+            return False
+        async with self.conn.execute(
+            "SELECT 1 FROM insights WHERE concept_key = ? AND not_interested = 1 LIMIT 1",
+            (key,),
+        ) as cursor:
+            return await cursor.fetchone() is not None
 
     async def concept_seen(self, concept_key: str, *, prior_to: int | None = None) -> bool:
         """True when this mechanic was stored in the last 30 days.
@@ -449,7 +473,29 @@ class Database:
             SELECT i.analysis_json AS analysis_json, s.title AS title
             FROM insights i
             JOIN scanned_items s ON s.id = i.item_id
-            WHERE i.user_liked = 1
+            WHERE i.user_liked = 1 AND i.not_interested = 0
+            ORDER BY i.created_at DESC
+            LIMIT ?
+        """
+        async with self.conn.execute(sql, (limit,)) as cursor:
+            rows = await cursor.fetchall()
+        titles: list[str] = []
+        for row in rows:
+            title = ""
+            try:
+                payload = json.loads(row["analysis_json"] or "{}")
+                title = str(payload.get("title_tr") or "").strip()
+            except json.JSONDecodeError:
+                title = ""
+            titles.append(title or str(row["title"] or "").strip())
+        return [title for title in titles if title]
+
+    async def dismissed_titles(self, limit: int = 8) -> list[str]:
+        sql = """
+            SELECT i.analysis_json AS analysis_json, s.title AS title
+            FROM insights i
+            JOIN scanned_items s ON s.id = i.item_id
+            WHERE i.not_interested = 1
             ORDER BY i.created_at DESC
             LIMIT ?
         """
@@ -505,6 +551,10 @@ class Database:
         if "concept_key" not in names:
             await self.conn.execute(
                 "ALTER TABLE insights ADD COLUMN concept_key TEXT NOT NULL DEFAULT ''"
+            )
+        if "not_interested" not in names:
+            await self.conn.execute(
+                "ALTER TABLE insights ADD COLUMN not_interested INTEGER NOT NULL DEFAULT 0"
             )
 
     async def notification_count(self, state: int) -> int:

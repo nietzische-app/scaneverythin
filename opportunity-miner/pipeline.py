@@ -8,7 +8,13 @@ from typing import Protocol
 
 import httpx
 
-from analysis.analyzer import DuplicateConcept, OpenAIAnalyzer, OpenAIUnavailable, clears_aha_bar
+from analysis.analyzer import (
+    DismissedConcept,
+    DuplicateConcept,
+    OpenAIAnalyzer,
+    OpenAIUnavailable,
+    clears_aha_bar,
+)
 from config import Settings
 from database.db import Database
 from database.models import (
@@ -259,6 +265,11 @@ class ScanService:
             return
         try:
             opportunity = await self.analyzer.analyze(post)
+        except DismissedConcept:
+            logger.info("Item %s SKIPPED - Not interested", row.id)
+            await self.db.update_item(row.id, status="filtered_out", note="not_interested")
+            await self._inc(report, "filtered_out")
+            return
         except DuplicateConcept:
             logger.info("Item %s SKIPPED - Duplicate Concept", row.id)
             await self.db.update_item(row.id, status="filtered_out", note="duplicate_concept")
@@ -302,6 +313,10 @@ class ScanService:
         logger.info("market dial %.2f; notify threshold %s", dial, required)
         for view in pending:
             concept = normalize_concept_key((view.analysis or {}).get("concept_key"))
+            if concept and await self.db.concept_dismissed(concept):
+                logger.info("Item %s SKIPPED - Not interested", view.item_id)
+                await self.db.set_telegram_state(view.insight_id, 2)
+                continue
             if concept and await self.db.concept_seen(concept, prior_to=view.insight_id):
                 logger.info("Item %s SKIPPED - Duplicate Concept", view.item_id)
                 await self.db.set_telegram_state(view.insight_id, 2)
