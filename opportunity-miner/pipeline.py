@@ -37,8 +37,6 @@ logger = logging.getLogger(__name__)
 
 MAX_ATTEMPTS = 3
 _CLASSIFY_STATUSES = ["new", "pending_classification"]
-# Two of the analysis budget stay available for raises. Leftover slots go back to the old queue.
-_FUNDING_ANALYSIS_RESERVE = 2
 
 
 class SupportsClassify(Protocol):
@@ -196,7 +194,7 @@ class ScanService:
         rows = await self._queue_with_funding_first(
             ["pending_analysis"],
             self.settings.max_analyses_per_scan,
-            _FUNDING_ANALYSIS_RESERVE,
+            self.settings.funding_analyses_per_scan,
         )
         await self._inc(report, "deferred", max(0, waiting - len(rows)))
         for row in rows:
@@ -367,8 +365,8 @@ class ScanService:
         """Funding fills the reserved slots, then the older queue, then any room left."""
         if limit <= 0:
             return []
-        funding = await self.db.list_queue(statuses, limit, source="funding")
-        others = await self.db.list_queue(statuses, limit, exclude_source="funding")
+        funding = await self.db.list_queue(statuses, limit, funding_signal=True)
+        others = await self.db.list_queue(statuses, limit, funding_signal=False)
         reserved = funding[: max(0, funding_first)]
         room = limit - len(reserved)
         general = others[:room]

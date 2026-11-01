@@ -1,8 +1,9 @@
 """Public funding headlines from Google News, Webrazzi, EU-Startups, and TechCrunch.
 
-A raise is kept only when the headline names a company and a round or an amount.
-The same company and round from two outlets becomes one post. A dead feed does
-not drop the others.
+A raise is kept when the headline names a company and at least one of a round,
+an amount, or a funding verb together with a funding noun. The company may sit
+before the verb or after "for" / "startup". The same company and round from two
+outlets becomes one post. A dead feed does not drop the others.
 """
 
 from __future__ import annotations
@@ -19,21 +20,113 @@ from ingestion.base import BaseFetcher, FetchBatch, FetchError
 from ingestion.feeds import parse_feed
 from textutil import clip
 
-# shortcut: headline regex only, switch to a model extract when a real raise has no verb or amount in the title
-_RAISE = re.compile(
-    r"\b(?:raises?|raised|secures?|secured|bags?|bagged|closes?|closed|lands?)\b"
-    r"|yatırım aldı|yatırım turu|yatırım yaptı|turunda",
+# Longer phrases first: alternation is leftmost-first, not longest-match.
+_VERB = re.compile(
+    r"yatırım turunu kapattı|yatırım açıkladı|yatırım duyurdu|yatırım aldı|yatırım turu|yatırım yaptı|"
+    r"fonlama aldı|fon aldı|turunu kapattı|turunda|"
+    r"\b(?:raises?|raised|secured|secures?|bagged|bags?|closed|closes?|landed|lands?|"
+    r"announced|announces?|nabbed|nabs?|received|receives?|collected|collects?|"
+    r"scooped|scoops?|grabbed|grabs?|snagged|snags?|banked|banks?|netted|nets?|"
+    r"hauled|hauls?|won|wins?|got|gets?|pulls?\s+in)\b",
     re.IGNORECASE,
 )
 _ROUND = re.compile(
-    r"pre-seed|series\s+[a-e]\b|seri\s+[a-e]\b|growth round|büyüme turu|\bseed\b|\btohum\b",
+    r"pre[-\s]seed|series\s+[a-f]\b|seri\s+[a-f]\b|growth round|bridge round|extension round|"
+    r"büyüme turu|köprü turu|\bseed\b|\btohum\b",
     re.IGNORECASE,
 )
 _AMOUNT = re.compile(
-    r"\$\s?\d[\d.,]*\s?(?:million|billion|mn|m|b|k)?"
+    r"[$€£]\s?\d[\d.,]*\s?(?:million|billion|mn|bn|m|b|k)?"
     r"|\d[\d.,]*\s?(?:million|billion|milyon|milyar)",
     re.IGNORECASE,
 )
+_FUNDING_NOUN = re.compile(
+    r"\b(?:funding|financing|investment|venture)\b|yatırım(?!cı)|fonlama",
+    re.IGNORECASE,
+)
+_AFTER_KIND = re.compile(
+    r"\b(?:startup|company|girişimi|sirketi|şirketi)\s+"
+    r"([A-Z0-9][\w.&'-]*(?:\s+[A-Z0-9][\w.&'-]*){0,4})",
+)
+_LEAD_SKIP = {
+    "the",
+    "a",
+    "an",
+    "its",
+    "their",
+    "exclusive",
+    "report",
+    "breaking",
+    "logistics",
+    "fintech",
+    "turkish",
+    "türk",
+    "turk",
+    "new",
+    "us",
+    "uk",
+}
+_STOP_WORDS = {
+    "to",
+    "for",
+    "in",
+    "on",
+    "with",
+    "from",
+    "after",
+    "as",
+    "at",
+    "by",
+    "of",
+    "and",
+    "or",
+    "its",
+    "their",
+    "the",
+    "a",
+    "an",
+    "ve",
+    "ile",
+    "için",
+    "icin",
+    "led",
+    "that",
+    "which",
+    "who",
+}
+_GENERIC_COMPANY = {
+    "funding",
+    "startup",
+    "startups",
+    "founders",
+    "founder",
+    "investors",
+    "investor",
+    "round",
+    "rounds",
+    "series",
+    "seed",
+    "venture",
+    "capital",
+    "investment",
+    "company",
+    "guide",
+    "tips",
+    "report",
+    "playbook",
+    "yatırım",
+    "yatirim",
+    "fon",
+    "fonlama",
+    "tur",
+    "turu",
+    "seri",
+    "girişim",
+    "girisimi",
+    "şirketi",
+    "sirketi",
+}
+_QUESTION = {"how", "why", "what", "when", "tips", "guide", "nasıl", "neden", "nasil"}
 _OUTLET_TAIL = re.compile(r"\s+[-–|]\s+([^-–|]{2,40})$")
 _PREFIX = re.compile(r"^(?:exclusive|report|breaking)\s*:?\s*", re.IGNORECASE)
 _PER_FEED = 40
@@ -89,18 +182,37 @@ def funding_post(post: RawPost) -> RawPost | None:
 
 
 def extract_funding(title: str, summary: str = "") -> tuple[str, str, str] | None:
-    """Company, display round, display amount. None when this is not a raise."""
+    """Company, display round, display amount. None when this is not a raise.
+
+    A company plus a round, a company plus an amount, or a company plus a
+    funding verb and a funding noun is enough. The company can lead the
+    headline, follow "startup", or follow "for".
+    """
     headline = _clean_title(title)
     blob = f"{headline}\n{summary or ''}"
-    verb = _RAISE.search(blob)
+    verb = _VERB.search(blob)
+    noun = _FUNDING_NOUN.search(blob)
     rnd = _normalize_round(_ROUND.search(blob))
     amount = _normalize_amount(_AMOUNT.search(blob))
-    if not ((verb and (rnd or amount)) or (rnd and amount)):
+    if not (rnd or amount or (verb and noun)):
         return None
     company = _company_name(headline)
     if not company:
         return None
     return company, rnd, amount
+
+
+def annotate_funding(post: RawPost) -> RawPost:
+    """Prefix a post whose text is a raise. Source, url, and id stay put."""
+    if (post.body or "").lstrip().startswith("Signal: funding"):
+        return post
+    parsed = extract_funding(post.title, post.body)
+    if parsed is None:
+        return post
+    company, rnd, amount = parsed
+    return post.model_copy(
+        update={"body": _body(company, rnd, amount, _what(post.body, post.title), post.body)}
+    )
 
 
 def collapse_funding(posts: list[RawPost]) -> list[RawPost]:
@@ -138,7 +250,7 @@ def _clean_title(title: str) -> str:
     if tail:
         outlet = tail.group(1)
         if (
-            not _RAISE.search(outlet)
+            not _VERB.search(outlet)
             and not _AMOUNT.search(outlet)
             and not _ROUND.search(outlet)
             and len(outlet.split()) <= 4
@@ -148,19 +260,59 @@ def _clean_title(title: str) -> str:
 
 
 def _company_name(headline: str) -> str:
-    match = _RAISE.search(headline)
-    head = headline[: match.start()] if match else headline
-    head = _AMOUNT.sub(" ", head)
-    head = _ROUND.sub(" ", head)
-    head = re.sub(r"\s+", " ", head).strip(" -–|:;,'\"")
-    words = head.split()
-    while words and words[-1].casefold() in {"in", "a", "an", "its", "their", "the", "for", "to", "ve"}:
-        words.pop()
-    if not words or words[0].casefold() in {"how", "why", "what", "when", "tips", "guide"}:
+    text = re.sub(r"\([^)]*\)", " ", headline)
+    named = _AFTER_KIND.search(text)
+    if named:
+        company = _finish_company(named.group(1))
+        if company:
+            return company
+    verb = _VERB.search(text)
+    head = text[: verb.start()] if verb else text
+    company = _finish_company(_strip_money_and_round(head))
+    if company:
+        return company
+    return _finish_company(_strip_money_and_round(text))
+
+
+def _strip_money_and_round(text: str) -> str:
+    text = _AMOUNT.sub(" ", text)
+    text = _ROUND.sub(" ", text)
+    text = _FUNDING_NOUN.sub(" ", text)
+    text = re.sub(r"[$€£₺]", " ", text)
+    text = re.sub(
+        r"\b(?:dolar|dollar|dollars|euro|euros|lira|tl|usd|eur)\w*\b",
+        " ",
+        text,
+        flags=re.IGNORECASE,
+    )
+    text = re.sub(r"['’](?:s|in|ın|un|ün|a|e|i|ı|u|ü|n)\b", "", text, flags=re.IGNORECASE)
+    return re.sub(r"\s+", " ", text).strip(" -–|:;,'\"")
+
+
+def _finish_company(raw: str) -> str:
+    words = [word.strip(".,;:|") for word in raw.split() if word.strip(".,;:|")]
+    while words and words[0].casefold() in _LEAD_SKIP:
+        words.pop(0)
+    kept: list[str] = []
+    for word in words:
+        folded = word.casefold().strip(".'’")
+        if kept and (folded in _STOP_WORDS or (word[:1].islower() and folded not in {"&", "and", "ve"})):
+            break
+        if not kept and (folded in _STOP_WORDS or word[:1].islower()):
+            continue
+        kept.append(word.strip(".'’"))
+    while kept and kept[-1].casefold().strip(".") in _STOP_WORDS:
+        kept.pop()
+    if not kept or kept[0].casefold() in _QUESTION:
         return ""
-    if len(words) > 8 or len(" ".join(words)) > 60:
+    if len(kept) > 6:
         return ""
-    return " ".join(words)
+    name = " ".join(kept)
+    if len(name) < 2 or len(name) > 60 or name.casefold() in _GENERIC_COMPANY:
+        return ""
+    if not re.search(r"[A-Za-zÀ-ÿ]", name):
+        return ""
+    return name
 
 
 def _normalize_round(match: re.Match[str] | None) -> str:
@@ -173,10 +325,14 @@ def _normalize_round(match: re.Match[str] | None) -> str:
         return f"Seri {folded.split()[-1].upper()}"
     labels = {
         "pre-seed": "Pre-seed",
+        "pre seed": "Pre-seed",
         "seed": "Seed",
         "tohum": "Tohum",
         "growth round": "Growth round",
+        "bridge round": "Bridge round",
+        "extension round": "Extension round",
         "büyüme turu": "Büyüme turu",
+        "köprü turu": "Köprü turu",
     }
     return labels.get(folded, "")
 

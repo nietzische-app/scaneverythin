@@ -29,7 +29,20 @@ _DEFAULT_NITTER = [
 ]
 _DEFAULT_GITHUB_TOPICS: list[str] = []
 _DEFAULT_TREND_KEYWORDS = ["B2B software", "AI tools", "workflow automation"]
-_DEFAULT_X_QUERIES = ["#buildinpublic", "#saas", "mcp server", "ai agent SaaS"]
+# Funding announcements in English and Turkish. Nitter is only the fallback.
+_DEFAULT_X_QUERIES = [
+    "raised seed",
+    "raises Series A",
+    "Series B funding",
+    "seed round",
+    "announced funding",
+    "secures funding",
+    "yatırım aldı",
+    "yatırım turu",
+    "seri A yatırım",
+    "tohum yatırımı",
+    "milyon dolar yatırım",
+]
 _DEFAULT_FUNDING_FEEDS = [
     "https://news.google.com/rss/search?q=%22series%20A%22%20OR%20%22seed%20round%22%20OR%20%22yat%C4%B1r%C4%B1m%20ald%C4%B1%22%20OR%20%22yat%C4%B1r%C4%B1m%20turu%22%20when%3A7d&hl=en-US&gl=US&ceid=US:en",
     "https://webrazzi.com/feed/",
@@ -93,7 +106,8 @@ class Settings(BaseModel):
     classifier_concurrency: int = 2
     analyzer_concurrency: int = 1
     max_classifications_per_scan: int = 25
-    max_analyses_per_scan: int = 5
+    max_analyses_per_scan: int = 10
+    funding_analyses_per_scan: int = 6
     notify_min_opportunity_score: int = 60
     request_timeout_seconds: float = 20.0
     llm_timeout_seconds: float = 45.0
@@ -122,6 +136,7 @@ class Settings(BaseModel):
     trends_min_growth: int = 200
     x_bearer_token: str = ""
     x_direct_queries: list[str] = Field(default_factory=lambda: list(_DEFAULT_X_QUERIES))
+    x_funding_queries_per_scan: int = 6
     funding_feeds: list[str] = Field(default_factory=lambda: list(_DEFAULT_FUNDING_FEEDS))
     funding_item_limit: int = 8
 
@@ -145,10 +160,19 @@ class Settings(BaseModel):
     def _concurrency(cls, value: int) -> int:
         return max(1, value)
 
-    @field_validator("max_classifications_per_scan", "max_analyses_per_scan")
+    @field_validator(
+        "max_classifications_per_scan",
+        "max_analyses_per_scan",
+        "funding_analyses_per_scan",
+    )
     @classmethod
     def _budgets(cls, value: int) -> int:
         return max(0, value)
+
+    @field_validator("x_funding_queries_per_scan")
+    @classmethod
+    def _query_budget(cls, value: int) -> int:
+        return max(1, value)
 
     @field_validator("port")
     @classmethod
@@ -216,7 +240,8 @@ def load_settings() -> Settings:
         classifier_concurrency=_int("CLASSIFIER_CONCURRENCY", 2),
         analyzer_concurrency=_int("ANALYZER_CONCURRENCY", 1),
         max_classifications_per_scan=_int("MAX_CLASSIFICATIONS_PER_SCAN", 25),
-        max_analyses_per_scan=_int("MAX_ANALYSES_PER_SCAN", 5),
+        max_analyses_per_scan=_int("MAX_ANALYSES_PER_SCAN", 10),
+        funding_analyses_per_scan=_int("FUNDING_ANALYSES_PER_SCAN", 6),
         notify_min_opportunity_score=_int("NOTIFY_MIN_OPPORTUNITY_SCORE", 60),
         request_timeout_seconds=_float("REQUEST_TIMEOUT_SECONDS", 20.0),
         llm_timeout_seconds=_float("LLM_TIMEOUT_SECONDS", 45.0),
@@ -246,6 +271,7 @@ def load_settings() -> Settings:
         trends_min_growth=_int("TRENDS_MIN_GROWTH", 200),
         x_bearer_token=_env("X_BEARER_TOKEN"),
         x_direct_queries=_csv("X_DIRECT_QUERIES", _DEFAULT_X_QUERIES),
+        x_funding_queries_per_scan=_int("X_FUNDING_QUERIES_PER_SCAN", 6),
         funding_feeds=_csv("FUNDING_FEEDS", _DEFAULT_FUNDING_FEEDS),
         funding_item_limit=_int("FUNDING_ITEM_LIMIT", 8),
         log_level=_env("LOG_LEVEL", "INFO"),

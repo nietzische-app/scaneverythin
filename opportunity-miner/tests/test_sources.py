@@ -25,7 +25,7 @@ from ingestion.saas_pioneer_fetcher import (
     SaasPioneerFetcher,
 )
 from ingestion.trends_fetcher import TrendsFetcher, rising_queries
-from ingestion.x_direct_fetcher import XDirectFetcher, direct_query, posts_from_search
+from ingestion.x_direct_fetcher import XDirectFetcher, direct_query, posts_from_search, query_groups
 from database.models import RawPost
 
 
@@ -174,6 +174,22 @@ class SourceTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Query: #buildinpublic", posts[0].body)
         self.assertEqual(posts[0].score, 12)
 
+    def test_default_x_queries_are_funding_announcements(self) -> None:
+        queries = Settings().x_direct_queries
+        folded = " ".join(queries).casefold()
+        self.assertIn("series a", folded)
+        self.assertIn("yatırım aldı", folded)
+        self.assertIn("tohum", folded)
+        self.assertNotIn("buildinpublic", folded)
+        self.assertNotIn("mcp server", folded)
+        built = direct_query(queries)
+        self.assertIn("-is:retweet", built)
+        self.assertIn('"yatırım aldı"', built)
+        self.assertLessEqual(len(query_groups(queries)[0]), 480)
+        self.assertGreaterEqual(Settings().funding_analyses_per_scan, 6)
+        self.assertGreaterEqual(Settings().max_analyses_per_scan, Settings().funding_analyses_per_scan)
+        self.assertGreater(Settings().x_funding_queries_per_scan, 1)
+
     async def test_fetchers_are_wired_and_read_fixtures(self) -> None:
         async with httpx.AsyncClient() as client:
             sources = [fetcher.source for fetcher in build_fetchers(Settings(), client)]
@@ -275,8 +291,45 @@ class SourceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(trends.posts[0].title, "Search spike: agent eval harness")
         self.assertIn("+220%", trends.posts[0].body)
         self.assertEqual(direct.posts[0].external_id, "55")
+        self.assertNotIn("Signal: funding", direct.posts[0].body)
         self.assertEqual(missing.posts, [])
         self.assertIn("X_BEARER_TOKEN is missing", missing.errors[0])
+
+    async def test_missing_x_token_falls_back_to_nitter_funding_search(self) -> None:
+        tweet = """<?xml version="1.0"?>
+        <rss><channel><item>
+          <title>Acme raises $12M Series A to automate customs</title>
+          <link>https://nitter.example/ada/status/77</link>
+          <guid>https://nitter.example/ada/status/77</guid>
+          <description>Acme raises $12M Series A to automate customs</description>
+        </item></channel></rss>"""
+        seen: list[str] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            seen.append(str(request.url))
+            self.assertNotIn("api.twitter.com", request.url.host)
+            self.assertIn("/search/rss", request.url.path)
+            return httpx.Response(200, text=tweet)
+
+        settings = Settings(
+            x_bearer_token="",
+            nitter_instances=["https://live.example"],
+            x_direct_queries=["raises Series A", "yatırım aldı"],
+            x_funding_queries_per_scan=2,
+            x_posts_per_account=2,
+        )
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            batch = await XDirectFetcher(settings, client).fetch()
+        self.assertEqual(len(batch.posts), 2)
+        self.assertEqual(batch.posts[0].source, "x-direct")
+        self.assertEqual(batch.posts[0].external_id, "77")
+        self.assertIn("Signal: funding", batch.posts[0].body)
+        self.assertIn("Company: Acme", batch.posts[0].body)
+        self.assertIn("Round: Series A", batch.posts[0].body)
+        self.assertIn("Query: raises Series A", batch.posts[0].body)
+        self.assertTrue(any("yatırım aldı" in unquote(url) for url in seen))
+        self.assertIn("X_BEARER_TOKEN is missing", batch.errors[0])
+        self.assertFalse(any("buildinpublic" in url for url in seen))
 
     def test_funding_headline_keeps_company_round_and_amount(self) -> None:
         parsed = extract_funding(
@@ -306,6 +359,39 @@ class SourceTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Round: Series A", post.body)
         self.assertIn("Amount: $12M", post.body)
         self.assertIn("What: Acme helps customs brokers file declarations.", post.body)
+        self.assertEqual(
+            extract_funding("Acme announces $20 million Series B", ""),
+            ("Acme", "Series B", "$20 million"),
+        )
+        self.assertEqual(
+            extract_funding("Logistics startup Acme nabs $4.5 million seed", ""),
+            ("Acme", "Seed", "$4.5 million"),
+        )
+        self.assertEqual(
+            extract_funding("Exclusive: $12M Series A for Acme to automate customs", ""),
+            ("Acme", "Series A", "$12M"),
+        )
+        self.assertEqual(extract_funding("Acme's $12M Series A", ""), ("Acme", "Series A", "$12M"))
+        self.assertEqual(
+            extract_funding("Northwind Labs closes Series B", ""),
+            ("Northwind Labs", "Series B", ""),
+        )
+        self.assertEqual(
+            extract_funding("Papara 100 milyon dolarlık yatırım aldı", ""),
+            ("Papara", "", "100 milyon"),
+        )
+        self.assertEqual(
+            extract_funding("Trendyol'a 100 milyon dolar yatırım", ""),
+            ("Trendyol", "", "100 milyon"),
+        )
+        self.assertEqual(
+            extract_funding("Seed round for Beam Health", "Beam Health files customs forms."),
+            ("Beam Health", "Seed", ""),
+        )
+        self.assertEqual(extract_funding("Acme secures funding from Sequoia", ""), ("Acme", "", ""))
+        self.assertIsNone(extract_funding("The Series A playbook", "How rounds work."))
+        self.assertIsNone(extract_funding("Why Stripe's seed round still matters", ""))
+        self.assertIsNone(extract_funding("Apple announces the iPhone", ""))
 
     def test_same_round_collapses_and_prefers_the_outlet_url(self) -> None:
         google = funding_post(
