@@ -22,13 +22,13 @@ Kurallar:
 - search_trend_signal: arama hacmi ve hype yönünün nitel değerlendirmesi. Kaynak desteklemiyorsa yüzde uydurma. Bilinmiyorsa "Sinyal belirsiz" yaz.
 - Aha! filtresi: bariz, sıkıcı veya jenerik fikirleri (genel PDF özetleyici, basit sosyal medya planlayıcı, standart lead-gen kazıyıcı, tipik AI müşteri hizmeti botu, herkesin hemen yazacağı birinci derece çözüm) zekice diye yazma.
 - Eski problem: derdin kendisi eskiyse, üstüne yeni model koysan da fırsat diye yazma. current_problem yalnız acı son 6 ayda çıktıysa veya belirgin kötüleştiyse true olsun.
-- Geliştirici problemi: alıcı yazılımcıysa (linter, CLI, MCP, Kubernetes, LLM gözlemi, agent altyapısı) developer_problem true ve puan 50'nin altında. Cursor veya Claude bunu zaten yapar.
+- Geliştirici problemi: alıcı yazılımcıysa (linter, CLI, MCP, Kubernetes, LLM gözlemi, agent altyapısı) developer_problem true ve puan 50'nin altında. Cursor veya Claude bunu zaten yapar. İstisna: şirket adı, tur ve somut bir Türkiye uyarlaması varsa altyapı veya geliştirici aracı olsa bile puanı 50'nin altına zorlama. Turu olmayan tek günlük sarmalayıcı 50'nin altında kalır.
 - Küçük araç: bir kişinin bir günde çıkardığı tek ekran small_tool true ve 50'nin altında. Geçen fikir büyük bir operasyon: çok müşteri, para akışı, regülasyon veya çok taraflı pazar.
 - AI devrimi çözmüş iş: genel bir sohbet botu, Cursor veya Claude bu işi bu ürün olmadan bitiriyorsa (PDF sohbet, özet, metin yeniden yazma, toplantı notu, genel destek botu, sıradan görsel veya video sarmalayıcı) fırsat diye yazma ve puanı 50'nin altında bırak.
 - aha_angle: çözümün neden bariz olmadığını 1 veya 2 cümleyle anlat. Barizse bunu açıkça söyle.
 - unfair_advantage: taklidi zorlaştıran hendek, büyüme kancası veya dağıtım numarası.
 - concept_key: mekanik ve problem için tek snake_case kimlik. Marka ve başlık yok. Kupe Cloud ile EasyKube ikisi de kubernetes_deployment_simplifier. AI Video Gen from PR ile RepoToVideo ikisi de github_pr_to_video_generator. PDF Chatbot ile AskPDF ikisi de pdf_document_qna_bot.
-- Signal: funding ise o şirketi yaz. funded_company, funding_round ve funding_amount gönderiden gelsin. Klon girişim uydurma. summary_tr o şirketi ve turun gösterdiği problemi anlatsın. Yatırım değilse üç alan boş.
+- Signal: funding ise o şirketi yaz. funded_company, funding_round ve funding_amount gönderiden gelsin. Klon girişim uydurma. summary_tr o şirketi ve turun gösterdiği problemi anlatsın. Yatırım değilse üç alan boş. Şirket, tur ve turkish_market.adaptation doluysa bu bir Türkiye kopya adayıdır; tr_adaptable true yaz.
 - summary_tr: tam 2 sade Türkçe cümle. 5 yaşındaki biri anlasın. DevOps veya bilgisayar bilimi bilgisi isteme.
 - jargon_analogy: fikir Kubernetes, RAG, vektör veritabanı, MCP veya CI/CD kullanıyorsa tek satır somut benzetme yaz. Örnek: Kubernetes = Binlerce sunucuyu otomatik yöneten dijital kargo limanı müdürü. Jargon yoksa boş string.
 - net_problem: kim, nerede, hangi somut eziyeti çekiyor veya kaç para kaybediyor. Formül yasak: "X yapmak isteyen kullanıcılara acı çektiriyor."
@@ -42,6 +42,7 @@ Kurallar:
   "funded_company": "",
   "funding_round": "",
   "funding_amount": "",
+  "tr_adaptable": false,
   "title_tr": "kısa fırsat adı",
   "summary_tr": "tam 2 sade cümle",
   "jargon_analogy": "jargon varsa tek satır benzetme, yoksa boş",

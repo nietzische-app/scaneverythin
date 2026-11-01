@@ -105,6 +105,7 @@ class Opportunity(BaseModel):
     funded_company: str = ""
     funding_round: str = ""
     funding_amount: str = ""
+    tr_adaptable: bool = False
     aha_pillars: list[str] = Field(default_factory=list)
     obvious: bool = False
     stale_problem: bool = False
@@ -261,6 +262,7 @@ def opportunity_from_payload(payload: dict[str, Any]) -> Opportunity:
         funded_company=clip(str(payload.get("funded_company") or "").strip(), 120),
         funding_round=clip(str(payload.get("funding_round") or "").strip(), 40),
         funding_amount=clip(str(payload.get("funding_amount") or "").strip(), 40),
+        tr_adaptable=_flag(payload.get("tr_adaptable")),
         aha_pillars=_short_list(payload.get("aha_pillars"), 4, 40),
         obvious=_flag(payload.get("obvious")),
         stale_problem=_flag(payload.get("stale_problem")),

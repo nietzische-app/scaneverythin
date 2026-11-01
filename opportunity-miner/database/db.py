@@ -211,6 +211,7 @@ class Database:
         oldest_first: bool = True,
         source: str | None = None,
         exclude_source: str | None = None,
+        funding_signal: bool | None = None,
     ) -> list[ItemRecord]:
         if limit <= 0 or not statuses:
             return []
@@ -224,6 +225,10 @@ class Database:
         if exclude_source:
             where += " AND source != ?"
             args.append(exclude_source)
+        if funding_signal is True:
+            where += " AND (source = 'funding' OR body LIKE 'Signal: funding%')"
+        elif funding_signal is False:
+            where += " AND source != 'funding' AND (body IS NULL OR body NOT LIKE 'Signal: funding%')"
         args.append(limit)
         sql = f"""
             SELECT {", ".join(_ITEM_COLUMNS)}

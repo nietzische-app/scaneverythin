@@ -1,7 +1,8 @@
 """Public X posts through Nitter-compatible RSS. No cookies, tokens, or login.
 
-Each scan takes a small rotating slice of the account list so a full day of
-30-minute runs covers the catalog without hammering one mirror.
+Account timelines still rotate across mirrors. Funding phrases are not searched
+here first: XDirectFetcher calls `search` only when the official API is missing
+or has failed.
 """
 
 from __future__ import annotations
@@ -93,6 +94,31 @@ class XFetcher:
             except FetchError as exc:
                 errors.append(f"x:#{tag}: {exc}")
         return FetchBatch(source=self.source, posts=posts, errors=errors)
+
+    async def search(self, queries: list[str], *, source: str | None = None) -> FetchBatch:
+        """Read recent posts for each phrase. Used as the direct-API fallback."""
+        origin = source or self.source
+        posts: list[RawPost] = []
+        errors: list[str] = []
+        for query in queries:
+            text = query.strip()
+            if not text:
+                continue
+            if self._exhausted():
+                errors.append("x: public RSS mirrors are down; remaining queries skipped")
+                break
+            try:
+                xml_text = await self._read(f"/search/rss?f=tweets&q={quote(text)}")
+                parsed = parse_feed(xml_text, source=origin, author=None)
+            except FetchError as exc:
+                errors.append(f"x:{text}: {exc}")
+                continue
+            for post in parsed[: self.settings.x_posts_per_account]:
+                body = post.body or post.title
+                if not body.startswith("Query:"):
+                    body = f"Query: {text}\n{body}"
+                posts.append(post.model_copy(update={"body": body}))
+        return FetchBatch(source=origin, posts=posts, errors=errors)
 
     def _exhausted(self) -> bool:
         instances = [item for item in self.settings.nitter_instances if item]

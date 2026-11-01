@@ -1,7 +1,8 @@
 """Public X accounts and hashtags the rotator walks across the day.
 
-These are well-known maker, infra, and gamedev accounts. The fetcher never
-logs in. It reads a rotating slice through public RSS mirrors.
+These are well-known maker, infra, and investor accounts. The hashtag slice
+follows funding announcements. The fetcher never logs in. Phrase search for
+raises lives in XDirectFetcher and uses these mirrors only when the API is down.
 """
 
 from __future__ import annotations
@@ -105,9 +106,10 @@ ACCOUNTS: tuple[str, ...] = (
 )
 
 HASHTAGS: tuple[str, ...] = (
-    "buildinpublic",
-    "indiehackers",
-    "microsaas",
-    "gamedev",
-    "sideproject",
+    "funding",
+    "seedround",
+    "seriesa",
+    "venturecapital",
+    "yatirim",
+    "girisim",
 )

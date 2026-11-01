@@ -192,6 +192,29 @@ class UpgradeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(apply_judge_gates(90, {"stale_problem": True, **pillars}), 49)
         self.assertEqual(apply_judge_gates(90, {"ai_solved": True, **pillars}), 49)
         self.assertEqual(apply_judge_gates(90, {"devtool_class": "pre_ai"}), 49)
+        funded_tool = {
+            "devtool_class": "ai_infra",
+            "developer_problem": True,
+            "ai_solved": True,
+            "small_tool": True,
+            "funded_company": "Acme",
+            "funding_round": "Series A",
+            "turkish_market": {
+                "adaptation": "Gümrük müşavirleri için Türkiye'de kurulur.",
+                "fit_score": 72,
+            },
+        }
+        self.assertEqual(apply_judge_gates(88, funded_tool), 88)
+        self.assertEqual(apply_judge_gates(88, {**funded_tool, "funding_round": ""}), 49)
+        self.assertEqual(
+            apply_judge_gates(88, {**funded_tool, "turkish_market": {"adaptation": "", "fit_score": 0}}),
+            49,
+        )
+        self.assertEqual(apply_judge_gates(88, {**funded_tool, "tr_adaptable": True, "turkish_market": {}}), 88)
+        from analysis.analyzer import clears_aha_bar
+
+        self.assertTrue(clears_aha_bar(88, funded_tool))
+        self.assertFalse(clears_aha_bar(88, {"developer_problem": True, "funded_company": "Acme"}))
         from analysis.analyzer import merge_committee
 
         rejected = merge_committee(
@@ -227,6 +250,32 @@ class UpgradeTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(passed.opportunity_score, 49)
         self.assertIn("Geliştirici problemi", passed.judge_verdict)
+        copied = merge_committee(
+            {
+                "title_tr": "Gümrük masası",
+                "summary_tr": "Acme gümrük beyanını otomatik dolduruyor.",
+                "core_problem_or_mechanic": "Beyanname eşleme",
+                "funded_company": "Acme",
+                "funding_round": "Series A",
+                "funding_amount": "$12M",
+                "turkish_market": {
+                    "adaptation": "Gümrük müşavirleri için Türkiye'de kurulur.",
+                    "fit_score": 72,
+                },
+            },
+            {
+                "opportunity_score": 86,
+                "devtool_class": "ai_infra",
+                "developer_problem": True,
+                "ai_solved": True,
+                "judge_verdict": "Altyapı, ama tur Türkiye'ye kopyalanır.",
+                "aha_pillars": [],
+            },
+        )
+        self.assertEqual(copied.opportunity_score, 86)
+        self.assertNotIn("REJECT", copied.judge_verdict)
+        self.assertEqual(copied.funded_company, "Acme")
+        self.assertEqual(copied.funding_round, "Series A")
         self.assertIn("REJECT", passed.judge_verdict)
         self.assertEqual(passed.aha_angle, "PR açılınca video kendiliğinden çıkar.")
         self.assertEqual(passed.unfair_advantage, "GitHub olayı dağıtımı başlatır.")

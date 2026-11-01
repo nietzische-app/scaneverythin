@@ -491,7 +491,7 @@ class PipelineTests(unittest.IsolatedAsyncioTestCase):
         for row in await self.db.list_items(status="new", limit=20):
             await self.db.update_item(row.id, status="pending_analysis")
         analyze = ScanService(
-            self.settings(max_analyses_per_scan=5),
+            self.settings(max_analyses_per_scan=5, funding_analyses_per_scan=2),
             self.db,
             fetchers=[StaticFetcher([])],
             classifier=ScriptedClassifier(gold_classification()),
@@ -504,6 +504,71 @@ class PipelineTests(unittest.IsolatedAsyncioTestCase):
         waiting = await self.db.list_items(status="pending_analysis", limit=20)
         self.assertEqual(sum(item.source == "funding" for item in analyzed), 2)
         self.assertEqual(sum(item.source == "funding" for item in waiting), 1)
+
+    async def test_funding_analysis_budget_can_cover_more_raises(self) -> None:
+        for index in range(4):
+            await self.db.enqueue(
+                sample_post(external_id=str(index), url=f"https://news.ycombinator.com/item?id={index}")
+            )
+        for letter in ("a", "b", "c", "d"):
+            await self.db.enqueue(
+                sample_post(
+                    source="funding",
+                    external_id=f"acme:series-{letter}",
+                    url=f"https://techcrunch.com/acme-{letter}",
+                    title=f"Acme {letter}",
+                )
+            )
+        await self.db.enqueue(
+            sample_post(
+                source="x-direct",
+                external_id="77",
+                url="https://x.com/i/status/77",
+                title="Acme raises $12M Series A",
+                body="Signal: funding\nCompany: Acme\nRound: Series A\nAmount: $12M",
+            )
+        )
+        for row in await self.db.list_items(status="new", limit=20):
+            await self.db.update_item(row.id, status="pending_analysis")
+        service = ScanService(
+            self.settings(max_analyses_per_scan=6, funding_analyses_per_scan=5),
+            self.db,
+            fetchers=[StaticFetcher([])],
+            classifier=ScriptedClassifier(gold_classification()),
+            analyzer=ScriptedAnalyzer(brief()),
+            notifier=ScriptedNotifier(),
+        )
+        report = await service.run()
+        self.assertEqual(report.analyzed, 6)
+        analyzed = await self.db.list_items(status="analyzed", limit=20)
+        funding_like = [
+            item
+            for item in analyzed
+            if item.source == "funding" or item.body.startswith("Signal: funding")
+        ]
+        self.assertEqual(len(funding_like), 5)
+        self.assertTrue(any(item.source == "x-direct" for item in funding_like))
+        self.assertEqual(sum(item.source == "hn" for item in analyzed), 1)
+
+    async def test_funded_devtools_with_a_turkish_adaptation_are_sent(self) -> None:
+        tool = brief(score=86)
+        tool.developer_problem = True
+        tool.ai_solved = True
+        tool.funded_company = "Acme"
+        tool.funding_round = "Series A"
+        tool.funding_amount = "$12M"
+        notifier = ScriptedNotifier()
+        service = ScanService(
+            self.settings(),
+            self.db,
+            fetchers=[StaticFetcher([sample_post()])],
+            classifier=ScriptedClassifier(gold_classification()),
+            analyzer=ScriptedAnalyzer(tool),
+            notifier=notifier,
+        )
+        report = await service.run()
+        self.assertEqual(report.notified, 1)
+        self.assertEqual(len(notifier.sent), 1)
 
     async def test_classification_budget_leaves_the_rest_queued(self) -> None:
         posts = [sample_post(external_id=str(index), url=f"https://news.ycombinator.com/item?id={index}") for index in range(3)]

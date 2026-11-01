@@ -80,7 +80,11 @@ SCOUT_PROMPT = (
     "If the post body says Signal: funding, describe that company: who raised, the round, and the amount. "
     "Set funded_company, funding_round, and funding_amount from the post. Do not invent a clone. "
     "summary_tr stays two plain sentences about that company and the problem the round evidences. "
-    "A recent round can make the pain current unless the company is a developer tool or a one-day utility. "
+    "A recent round can make the pain current. "
+    "When funded_company, funding_round, and a concrete Turkish adaptation are all present, "
+    "keep the draft score even if the product is infrastructure or a developer tool: "
+    "that company is a copy candidate for Turkey. "
+    "A one-day wrapper with no named round still stays under 50. "
     "When the post is not a funding announcement, leave those three fields empty."
 )
 
@@ -127,8 +131,11 @@ JUDGE_PROMPT = (
     "Passing requires current_problem true, developer_problem false, small_tool false, why_now, and one other pillar. "
     "Otherwise set opportunity_score strictly below 50. Do not leave it at 79. "
     "If funded_company is set, keep that company, round, and amount. Do not invent a clone. "
-    "A recent round can set current_problem true unless the company is a developer tool or a one-day utility. "
-    "A recent round does not excuse a developer tool or a one-day utility. "
+    "Set tr_adaptable true when the product can be copied or localized for Turkey. "
+    "When funded_company, funding_round, and tr_adaptable are all present, "
+    "do not force opportunity_score below 50 for developer_problem, ai_infra, or a thin Aha bar. "
+    "A one-day wrapper with no named round still stays below 50. "
+    "A recent round can set current_problem true. "
     "If the Scout left aha_angle or unfair_advantage empty, fill them in Turkish. Do not invent a clever angle for an obvious idea. "
     "concept_key: the mechanic id in lowercase snake_case, with no brand or product title. "
     "If the Scout key names a product instead of the mechanic, replace it. "
@@ -142,7 +149,7 @@ JUDGE_PROMPT = (
     "mrr_likely, devtool_class, top_competitors, competitor_weakness, search_trend_signal, "
     "obvious, stale_problem, ai_solved, developer_problem, current_problem, small_tool, "
     "aha_pillars, aha_angle, unfair_advantage, concept_key, "
-    "funded_company, funding_round, and funding_amount."
+    "funded_company, funding_round, funding_amount, and tr_adaptable."
 )
 
 # Scout owns the brief the rest of the app already reads. The Judge owns the score.
@@ -388,14 +395,26 @@ def merge_committee(scout: dict, judge: dict) -> Opportunity:
             payload[key] = judge.get(key)
     if not _blank(judge.get("aha_pillars")):
         payload["aha_pillars"] = judge.get("aha_pillars")
-    for flag in ("obvious", "stale_problem", "ai_solved", "developer_problem", "current_problem", "small_tool"):
+    for flag in (
+        "obvious",
+        "stale_problem",
+        "ai_solved",
+        "developer_problem",
+        "current_problem",
+        "small_tool",
+        "tr_adaptable",
+    ):
         if flag in judge:
             payload[flag] = judge.get(flag)
     if not _blank(judge.get("concept_key")):
         payload["concept_key"] = judge.get("concept_key")
     opportunity = opportunity_from_payload(payload)
-    gated = apply_judge_gates(opportunity.opportunity_score, judge)
-    verdict = _stamp_creativity_verdict(_stamp_devtool_verdict(opportunity.judge_verdict, judge, gated), judge)
+    view = _gate_view(payload, judge)
+    gated = apply_judge_gates(opportunity.opportunity_score, view)
+    verdict = _stamp_creativity_verdict(
+        _stamp_devtool_verdict(opportunity.judge_verdict, view, gated),
+        view,
+    )
     updates: dict = {}
     if gated != opportunity.opportunity_score:
         updates["opportunity_score"] = gated
@@ -423,7 +442,13 @@ def _devtool_kind(judge: dict) -> str:
 
 
 def apply_judge_gates(score: int, judge: dict) -> int:
-    """Enforce the reject rules in code so a soft model score cannot sneak through."""
+    """Enforce the reject rules in code so a soft model score cannot sneak through.
+
+    A funded company with a round and a Turkish adaptation keeps its score.
+    Infrastructure and developer tools are copy candidates in that case.
+    """
+    if funding_copy_candidate(judge):
+        return score
     creative = (
         aha_pillar_count(judge) >= 2
         and _has_why_now(judge)
@@ -443,9 +468,11 @@ def apply_judge_gates(score: int, judge: dict) -> int:
 
 
 def clears_aha_bar(score: int, analysis: dict | None) -> bool:
-    """Telegram only gets a large, current, non-developer idea."""
+    """Telegram gets a large current idea, or a funded company Turkey can adapt."""
     del score
     payload = analysis or {}
+    if funding_copy_candidate(payload):
+        return True
     if (
         is_obvious(payload)
         or is_stale(payload)
@@ -456,6 +483,42 @@ def clears_aha_bar(score: int, analysis: dict | None) -> bool:
     ):
         return False
     return aha_pillar_count(payload) >= 2 and _has_why_now(payload)
+
+
+def funding_copy_candidate(source: object) -> bool:
+    """Company, round, and a real Turkish adaptation. Amount alone is not enough."""
+    if not isinstance(source, dict):
+        return False
+    company = str(source.get("funded_company") or "").strip()
+    rnd = str(source.get("funding_round") or "").strip()
+    if not company or not rnd:
+        return False
+    return _tr_adaptable(source)
+
+
+def _tr_adaptable(source: dict) -> bool:
+    if _yes(source.get("tr_adaptable")):
+        return True
+    market = source.get("turkish_market") if isinstance(source.get("turkish_market"), dict) else {}
+    adaptation = " ".join(str(market.get("adaptation") or "").split())
+    folded = adaptation.casefold()
+    if folded and folded not in {"yok", "gerekmez", "none", "n/a", "bilinmiyor"} and len(adaptation) >= 12:
+        return True
+    try:
+        fit = int(market.get("fit_score") or 0)
+    except (TypeError, ValueError):
+        fit = 0
+    return fit >= 50
+
+
+def _gate_view(payload: dict, judge: dict) -> dict:
+    """Scout brief plus Judge flags. A blank Judge field does not erase the Scout."""
+    view = dict(payload)
+    for key, value in judge.items():
+        if _blank(value) and not _blank(view.get(key)):
+            continue
+        view[key] = value
+    return view
 
 
 def is_developer_problem(source: object) -> bool:
@@ -524,6 +587,8 @@ def _pillar_id(text: str) -> str:
 
 
 def _stamp_creativity_verdict(verdict: str, judge: dict) -> str:
+    if funding_copy_candidate(judge):
+        return verdict
     if is_ai_solved(judge):
         tag = "AI devrimi çözmüş (REJECT)"
     elif is_stale(judge):
@@ -538,6 +603,8 @@ def _stamp_creativity_verdict(verdict: str, judge: dict) -> str:
 
 
 def _stamp_devtool_verdict(verdict: str, judge: dict, score: int) -> str:
+    if funding_copy_candidate(judge):
+        return verdict
     kind = _devtool_kind(judge)
     if kind == "pre_ai":
         tag = "Pre-AI obsolete tool (REJECT)"
